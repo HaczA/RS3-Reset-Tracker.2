@@ -159,69 +159,87 @@ function renderList() {
     const row = document.createElement("div");
     row.className = "item"; row.draggable = true;
 
-    const cb = document.createElement("input"); cb.type="checkbox"; cb.checked = !!it.done;
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = !!it.done;
     cb.onchange = () => { it.done = cb.checked; save(); };
+
     const name = document.createElement("input");
     name.value = it.name;
-    name.style.flex="1"; name.style.background="transparent"; name.style.color="#e9edf3"; name.style.border="0"; name.style.outline="none";
+    name.style.flex = "1";
+    name.style.background = "transparent";
+    name.style.color = "#e9edf3";
+    name.style.border = "0";
+    name.style.outline = "none";
     name.onchange = () => { it.name = name.value.trim(); save(); };
-    const link = document.createElement("a"); link.href = it.url || "#"; link.textContent = it.url ? "Wiki" : ""; link.target="_blank";
 
-    row.appendChild(cb); row.appendChild(name); row.appendChild(link);
+    const link = document.createElement("a");
+    link.href = it.url || "#";
+    link.textContent = it.url ? "Wiki" : "";
+    link.target = "_blank";
+
+    const del = document.createElement("button");
+    del.textContent = "Del";
+    del.style.padding = "6px 8px";
+    del.onclick = () => {
+      if (confirm(`Delete "${it.name}"?`)) {
+        arr.splice(idx, 1);
+        save(); renderList();
+      }
+    };
+
+    row.appendChild(cb);
+    row.appendChild(name);
+    row.appendChild(link);
+    row.appendChild(del);
+
+    // drag to reorder
     row.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", idx); });
     row.addEventListener("dragover", e => e.preventDefault());
-    row.addEventListener("drop", e => { e.preventDefault(); const from = +e.dataTransfer.getData("text/plain"); const to = idx;
-      if (from===to) return; const a=arr[from]; arr.splice(from,1); arr.splice(to,0,a); save(); renderList();
+    row.addEventListener("drop", e => {
+      e.preventDefault();
+      const from = +e.dataTransfer.getData("text/plain");
+      const to = idx;
+      if (from === to) return;
+      const a = arr[from];
+      arr.splice(from,1);
+      arr.splice(to,0,a);
+      save(); renderList();
     });
+
     listEl.appendChild(row);
   });
 }
+
 el("clearDone").onclick = () => { const a = getScopeArr(); for (let i=a.length-1;i>=0;i--) if (a[i].done) a.splice(i,1); save(); renderList(); };
 el("resetScope").onclick = () => { if (!confirm("Uncheck all items on this tab?")) return; getScopeArr().forEach(x=>x.done=false); save(); renderList(); };
 
-/* Import from DailyScape (may be blocked by CORS — that's OK) */
-el("importDailyScape").onclick = async () => {
+<script>
+// Import all tasks from tasks.json (works in Alt1)
+document.getElementById("importDailyScape").onclick = async () => {
   try {
-    const res = await fetch("https://dailyscape.github.io/", { mode: "cors" });
-    const html = await res.text();
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const buckets = {
-      daily:   pickSection(doc, ["Dailies","Daily Gathering"]),
-      weekly:  pickSection(doc, ["Weeklies"]),
-      monthly: pickSection(doc, ["Monthlies"])
-    };
+    const res = await fetch("https://hacza.github.io/RS3-Reset-Tracker.2/tasks.json?v=1");
+    if (!res.ok) throw new Error("tasks.json not found");
+    const data = await res.json(); // { daily:[], weekly:[], monthly:[] }
+
     ["daily","weekly","monthly"].forEach(scope => {
-      const names = buckets[scope];
-      const here  = state.profiles[getP()].items[scope];
-      names.forEach(t => {
-        if (!here.some(h => h.name.toLowerCase() === t.name.toLowerCase())) {
-          here.push(t);
+      const incoming = data[scope] || [];
+      const here = state.profiles[getP()].items[scope];
+      incoming.forEach(t => {
+        if (!here.some(h => h.name.toLowerCase() === (t.name || "").toLowerCase())) {
+          here.push({ id: uid(), name: t.name || "", url: t.url || "", done: false });
         }
       });
     });
+
     save(); renderList();
-    alert("Imported tasks from DailyScape (merged).");
+    alert("Imported tasks from tasks.json");
   } catch (e) {
     console.error(e);
-    alert("Import failed (likely CORS). You can still add tasks manually.");
+    alert("Import failed (tasks.json missing or invalid).");
   }
 };
-function pickSection(doc, headings) {
-  const out = [];
-  headings.forEach(h => {
-    const hEl = Array.from(doc.querySelectorAll("h2,h3,h4,h5")).find(x => x.textContent && x.textContent.toLowerCase().includes(h.toLowerCase()));
-    if (!hEl) return;
-    const parent = hEl.parentElement; if (!parent) return;
-    const links = parent.querySelectorAll("a[href^='http']");
-    links.forEach(a => {
-      const name = a.textContent.trim();
-      if (name && !out.some(x=>x.name.toLowerCase()===name.toLowerCase())) {
-        out.push({ id: uid(), name, url: a.href, done:false });
-      }
-    });
-  });
-  return out;
-}
+</script>
+
 
 /* Reset timers (UTC) */
 function nextDailyUTC(now=new Date())   { return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+1, 0,0,0)); }
