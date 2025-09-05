@@ -76,25 +76,25 @@
 </div>
 
 <script>
-/* run after the page exists */
+/* Everything runs AFTER the page is ready */
 window.addEventListener('DOMContentLoaded', () => {
-  document.getElementById("jsok").textContent = "JS: OK v14";
+  document.getElementById("jsok").textContent = "JS: OK";
 
-  /* Alt1 hook (hardcoded) */
+  // Alt1 register (safe if not in Alt1)
   try { if (window.alt1 && alt1.identifyAppUrl) { alt1.identifyAppUrl("https://hacza.github.io/RS3-Reset-Tracker.2/appconfig.json"); } } catch(e){}
 
-  /* ===== State ===== */
+  // ===== State =====
   const LS_KEY = "rs3_resets_tracker_v1";
   let state = load() || initDefault();
   let currentScope = "daily";
 
-  /* ===== Elements ===== */
+  // ===== Elements =====
   const el = (id) => document.getElementById(id);
   const listEl = el("list");
   const tabs = Array.from(document.querySelectorAll(".tab"));
   const profileSel = el("profile");
 
-  /* ===== Profiles ===== */
+  // ===== Profiles =====
   function refreshProfiles() {
     profileSel.innerHTML = "";
     state.profiles.forEach((p,i) => {
@@ -120,7 +120,7 @@ window.addEventListener('DOMContentLoaded', () => {
   };
   profileSel.onchange = () => { state.currentProfile = profileSel.value; save(); render(); };
 
-  /* ===== Tabs ===== */
+  // ===== Tabs =====
   tabs.forEach(t => t.onclick = () => {
     tabs.forEach(x=>x.classList.remove("active"));
     t.classList.add("active");
@@ -128,7 +128,7 @@ window.addEventListener('DOMContentLoaded', () => {
     renderList();
   });
 
-  /* ===== Add & edit ===== */
+  // ===== Add & edit =====
   el("addBtn").onclick = addItem;
   el("addText").addEventListener("keydown", e => { if (e.key === "Enter") addItem(); });
   function addItem() {
@@ -142,7 +142,7 @@ window.addEventListener('DOMContentLoaded', () => {
     save(); renderList();
   }
 
-  /* ===== List render (checkbox + delete + drag) ===== */
+  // ===== List render (checkbox + delete + drag) =====
   function renderList() {
     const arr = getScopeArr();
     listEl.innerHTML = "";
@@ -193,122 +193,15 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  /* ===== IMPORT (loads their JS and reads the global binding safely) ===== */
-  document.getElementById("importDailyScape").onclick = async () => {
-    const BTN = document.getElementById("importDailyScape");
-    const prev = BTN.textContent; BTN.textContent = "Importing…"; BTN.disabled = true;
-
-    const SOURCES = [
-      "https://dailyscape.github.io/rsdata/rsdata.js",
-      "https://cdn.jsdelivr.net/gh/dailyscape/rsdata@main/rsdata.js",
-      "https://raw.githack.com/dailyscape/rsdata/main/rsdata.js",
-      "https://cdn.statically.io/gh/dailyscape/rsdata/main/rsdata.js"
-    ];
-
-    try {
-      let ds = null, used = null, errors = [];
-
-      for (const base of SOURCES) {
-        // clear any previous binding on window (won't affect let/const)
-        try { delete window.rsapidata; } catch {}
-        const src = base + "?t=" + Date.now();
-
-        // load as <script> so CORS can’t block it
-        await new Promise((resolve, reject) => {
-          const s = document.createElement("script");
-          s.src = src; s.async = true;
-          s.onload = () => resolve();
-          s.onerror = () => reject(new Error("script load failed"));
-          document.head.appendChild(s);
-        }).catch(e => errors.push(base + " — " + e.message));
-
-        // 🔑 KEY FIX: read either a window property OR a global let/const binding
-        if (!ds) {
-          try {
-            // this picks up a global `let/const rsapidata` too
-            ds = (typeof rsapidata !== "undefined") ? rsapidata : null;
-          } catch(_) { ds = null; }
-        }
-        if (!ds && window.rsapidata && typeof window.rsapidata === "object") {
-          ds = window.rsapidata;
-        }
-        if (ds) { used = base; break; }
-      }
-
-      if (!ds) throw new Error("No dataset found.\nTried:\n" + errors.join("\n"));
-
-      // normalize helper
-      const norm = (arr = []) => arr.map(x => ({
-        name: (x?.name || x?.item || x?.title || x?.label || "").trim(),
-        url:  (x?.wiki || x?.url || x?.link || x?.wikilink || "").trim()
-      })).filter(t => t.name);
-
-      // accept both singular/plural keys + sectioned fallbacks
-      const dailyAll   = [
-        ...norm(ds.dailies || ds.daily || ds.dailyTasks || []),
-        ...norm(ds.gathering || ds.dailyGathering || ds.gather || [])
-      ];
-      const weeklyAll  = norm(ds.weeklies || ds.weekly || ds.weeklyTasks || []);
-      const monthlyAll = norm(ds.monthlies || ds.monthly || ds.monthlyTasks || []);
-
-      // sectioned shape (if present)
-      const sections = Array.isArray(ds.sections) ? ds.sections : Array.isArray(ds.data) ? ds.data : [];
-      for (const sec of sections) {
-        const title = String(sec?.name || sec?.title || sec?.section || "").toLowerCase();
-        const items = norm(sec?.items || sec?.list || []);
-        if (!items.length) continue;
-        if (title.includes("gather")) dailyAll.push(...items);
-        else if (title.includes("dail")) dailyAll.push(...items);
-        else if (title.includes("week")) weeklyAll.push(...items);
-        else if (title.includes("month")) monthlyAll.push(...items);
-      }
-
-      const found = { daily: dailyAll.length, weekly: weeklyAll.length, monthly: monthlyAll.length };
-
-      // merge into your profile (skip duplicates by name)
-      const added = { daily:0, weekly:0, monthly:0 };
-      const buckets = { daily: dailyAll, weekly: weeklyAll, monthly: monthlyAll };
-      ["daily","weekly","monthly"].forEach(scope => {
-        const incoming = buckets[scope] || [];
-        const here = state.profiles[getP()].items[scope];
-        const have = new Set(here.map(h => (h.name || "").toLowerCase()));
-        incoming.forEach(t => {
-          const key = (t.name || "").toLowerCase();
-          if (!key || have.has(key)) return;
-          here.push({ id: uid(), name: t.name, url: t.url || "", done: false });
-          have.add(key);
-          added[scope]++;
-        });
-      });
-
-      save(); renderList();
-
-      let msg = `Imported from DailyScape
-Found: ${found.daily} daily, ${found.weekly} weekly, ${found.monthly} monthly.
-Added: ${added.daily} daily, ${added.weekly} weekly, ${added.monthly} monthly.
-Source: ${used}`;
-      if (!found.daily && !found.weekly && !found.monthly) {
-        const keys = Object.keys(ds || {}).slice(0,30).join(", ") || "(none)";
-        msg += `
-
-Diagnostics:
-Top-level keys in dataset: ${keys}`;
-      }
-      alert(msg);
-
-    } catch (e) {
-      console.error(e);
-      alert("Import failed: " + e.message);
-    } finally {
-      BTN.textContent = prev; BTN.disabled = false;
-    }
+  // ===== Import (we’ll debug this AFTER JS is stable) =====
+  document.getElementById("importDailyScape").onclick = () => {
+    alert("Importer is next. First we made sure the app is running.");
   };
 
-  /* ===== Timers (UTC) ===== */
+  // ===== Timers (UTC) =====
   function nextDailyUTC(now=new Date())   { return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+1, 0,0,0)); }
   function nextWeeklyUTC(now=new Date())  { const day = now.getUTCDay(); const daysToWed = (3 - day + 7) % 7 || 7; return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+daysToWed, 0,0,0)); }
   function firstOfNextMonthUTC(now=new Date()) { const y=now.getUTCFullYear(), m=now.getUTCMonth(); return new Date(Date.UTC(m===11?y+1:y, (m+1)%12, 1, 0,0,0)); }
-
   function tickClocks() {
     const now = new Date();
     el("nextDaily").textContent   = eta(nextDailyUTC(now)-now);
@@ -326,13 +219,12 @@ Top-level keys in dataset: ${keys}`;
     if (now >= next) {
       state.profiles[getP()].items[scope].forEach(x=>x.done=false);
       state.meta[field] = now.toISOString();
-      save();
-      renderList();
+      save(); renderList();
     }
   }
   function eta(ms) { if (ms<0) ms=0; const s=Math.floor(ms/1000); const h=String(Math.floor(s/3600)).padStart(2,"0"); const m=String(Math.floor((s%3600)/60)).padStart(2,"0"); const ss=String(s%60).padStart(2,"0"); return `${h}:${m}:${ss}`; }
 
-  /* ===== Helpers ===== */
+  // ===== Helpers =====
   function initDefault() {
     return {
       currentProfile: "0",
@@ -351,9 +243,6 @@ Top-level keys in dataset: ${keys}`;
   refreshProfiles(); render(); tickClocks();
   function render(){ refreshProfiles(); tabs.forEach(t => t.classList.toggle("active", t.dataset.scope===currentScope)); renderList(); }
 
-  // extra buttons
-  document.getElementById("clearDone").onclick = () => { getScopeArr().forEach(x=>x.done=false); save(); renderList(); };
-  document.getElementById("resetScope").onclick = () => { if (confirm("Clear all tasks on this tab?")) { state.profiles[getP()].items[currentScope] = []; save(); renderList(); } };
 });
 </script>
 </body>
