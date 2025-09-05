@@ -67,7 +67,7 @@
 
     <div class="list" id="list"></div>
     <div class="small" style="margin-top:8px;">
-      Tip: Click the task name to edit. Drag to reorder (browser only). Progress auto-resets at UTC boundaries:
+      Tip: Click the task name to edit. Drag to reorder. Progress auto-resets at UTC boundaries:
       dailies 00:00 UTC; weeklies 00:00 UTC Wednesdays; monthlies 00:00 UTC day 1.
     </div>
   </div>
@@ -76,25 +76,22 @@
 </div>
 
 <script>
-/* run after the page exists */
 window.addEventListener('DOMContentLoaded', () => {
   document.getElementById("jsok").textContent = "JS: OK";
-
-  /* Alt1 hook (hardcoded) */
   try { if (window.alt1 && alt1.identifyAppUrl) { alt1.identifyAppUrl("https://hacza.github.io/RS3-Reset-Tracker.2/appconfig.json"); } } catch(e){}
 
-  /* ======= State ======= */
+  /* ===== State ===== */
   const LS_KEY = "rs3_resets_tracker_v1";
   let state = load() || initDefault();
   let currentScope = "daily";
 
-  /* ======= Elements ======= */
+  /* ===== Elements ===== */
   const el = (id) => document.getElementById(id);
   const listEl = el("list");
   const tabs = Array.from(document.querySelectorAll(".tab"));
   const profileSel = el("profile");
 
-  /* ======= Profiles ======= */
+  /* ===== Profiles ===== */
   function refreshProfiles() {
     profileSel.innerHTML = "";
     state.profiles.forEach((p,i) => {
@@ -120,7 +117,7 @@ window.addEventListener('DOMContentLoaded', () => {
   };
   profileSel.onchange = () => { state.currentProfile = profileSel.value; save(); render(); };
 
-  /* ======= Tabs ======= */
+  /* ===== Tabs ===== */
   tabs.forEach(t => t.onclick = () => {
     tabs.forEach(x=>x.classList.remove("active"));
     t.classList.add("active");
@@ -128,7 +125,7 @@ window.addEventListener('DOMContentLoaded', () => {
     renderList();
   });
 
-  /* ======= Add & edit ======= */
+  /* ===== Add & edit ===== */
   el("addBtn").onclick = addItem;
   el("addText").addEventListener("keydown", e => { if (e.key === "Enter") addItem(); });
   function addItem() {
@@ -142,7 +139,7 @@ window.addEventListener('DOMContentLoaded', () => {
     save(); renderList();
   }
 
-  /* ======= List render (checkbox + delete + drag) ======= */
+  /* ===== List render ===== */
   function renderList() {
     const arr = getScopeArr();
     listEl.innerHTML = "";
@@ -176,7 +173,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
       row.append(cb, name, link, del);
 
-      // drag-to-reorder
+      // drag-reorder
       row.addEventListener("dragstart", e => e.dataTransfer.setData("text/plain", idx));
       row.addEventListener("dragover", e => e.preventDefault());
       row.addEventListener("drop", e => {
@@ -193,138 +190,37 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  /* ======= IMPORT FROM DAILYSCAPE (JSONP style) ======= */
+  /* ===== IMPORT (robust) ===== */
   document.getElementById("importDailyScape").onclick = async () => {
     const BTN = document.getElementById("importDailyScape");
     const prev = BTN.textContent; BTN.textContent = "Importing…"; BTN.disabled = true;
 
-    // we’ll load their JS file as a <script>, which sets window.rsapidata
     const SOURCES = [
-      "https://dailyscape.github.io/rsdata/rsdata.js",
-      "https://cdn.jsdelivr.net/gh/dailyscape/rsdata@main/rsdata.js",
-      "https://raw.githack.com/dailyscape/rsdata/main/rsdata.js",
-      "https://cdn.statically.io/gh/dailyscape/rsdata/main/rsdata.js"
+      // main bundle
+      { url:"https://dailyscape.github.io/rsdata/rsdata.js", global:"rsapidata" },
+      { url:"https://cdn.jsdelivr.net/gh/dailyscape/rsdata@main/rsdata.js", global:"rsapidata" },
+      { url:"https://cdn.statically.io/gh/dailyscape/rsdata/main/rsdata.js", global:"rsapidata" },
+
+      // alternate bundle used by site
+      { url:"https://dailyscape.github.io/rsdata/rsapidatawikibulk.js", global:"rsapidata" },
+      { url:"https://cdn.jsdelivr.net/gh/dailyscape/rsdata@main/rsapidatawikibulk.js", global:"rsapidata" },
+      { url:"https://cdn.statically.io/gh/dailyscape/rsdata/main/rsapidatawikibulk.js", global:"rsapidata" },
     ];
 
     try {
-      let ds = null, used = null, lastErr = null;
-
-      for (const base of SOURCES) {
-        // clean any previous value
-        try { delete window.rsapidata; } catch {}
-        const src = base + "?t=" + Date.now();
-
-        // load as <script>
+      let ds = null, used = null, errors = [];
+      for (const src of SOURCES) {
+        // clear any previous
+        try { delete window[src.global]; } catch {}
+        // load as <script> so CORS cannot block it
         await new Promise((resolve, reject) => {
           const s = document.createElement("script");
-          s.src = src;
+          s.src = src.url + "?t=" + Date.now();
           s.async = true;
           s.onload = () => resolve();
           s.onerror = () => reject(new Error("script load failed"));
           document.head.appendChild(s);
-        }).catch(e => { lastErr = e; });
+        }).catch(e => errors.push(src.url + " — " + e.message));
 
-        // did it set window.rsapidata?
-        if (window.rsapidata && typeof window.rsapidata === "object") {
-          ds = window.rsapidata;
-          used = base;
-          break;
-        }
-      }
-
-      if (!ds) throw new Error("Couldn't read DailyScape data (" + (lastErr && lastErr.message || "no data") + ")");
-
-      // normalize to {name, url}
-      const norm = (arr = []) => arr.map(x => ({
-        name: (x?.name || x?.item || x?.title || "").trim(),
-        url:  (x?.wiki || x?.url || x?.link || "").trim()
-      })).filter(t => t.name);
-
-      // accept both singular/plural keys they use
-      const dailySrc   = ds.dailies || ds.daily || [];
-      const gatherSrc  = ds.gathering || ds.dailyGathering || [];
-      const weeklySrc  = ds.weeklies || ds.weekly || [];
-      const monthlySrc = ds.monthlies || ds.monthly || [];
-
-      const dailyAll   = [...norm(dailySrc), ...norm(gatherSrc)];
-      const weeklyAll  = norm(weeklySrc);
-      const monthlyAll = norm(monthlySrc);
-
-      const found = { daily: dailyAll.length, weekly: weeklyAll.length, monthly: monthlyAll.length };
-
-      // merge into your profile (skip duplicates by name)
-      const added = { daily:0, weekly:0, monthly:0 };
-      const buckets = { daily: dailyAll, weekly: weeklyAll, monthly: monthlyAll };
-      ["daily","weekly","monthly"].forEach(scope => {
-        const incoming = buckets[scope] || [];
-        const here = state.profiles[getP()].items[scope];
-        const have = new Set(here.map(h => (h.name || "").toLowerCase()));
-        incoming.forEach(t => {
-          const key = (t.name || "").toLowerCase();
-          if (!key || have.has(key)) return;
-          here.push({ id: uid(), name: t.name, url: t.url || "", done: false });
-          have.add(key);
-          added[scope]++;
-        });
-      });
-
-      save(); renderList();
-      alert(`Imported from DailyScape\nFound: ${found.daily} daily, ${found.weekly} weekly, ${found.monthly} monthly.\nAdded: ${added.daily} daily, ${added.weekly} weekly, ${added.monthly} monthly.\nSource: ${used}`);
-    } catch (e) {
-      console.error(e);
-      alert("Import failed: " + e.message);
-    } finally {
-      BTN.textContent = prev; BTN.disabled = false;
-    }
-  };
-
-  /* ======= Reset timers (UTC) ======= */
-  function nextDailyUTC(now=new Date())   { return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+1, 0,0,0)); }
-  function nextWeeklyUTC(now=new Date())  { const day = now.getUTCDay(); const daysToWed = (3 - day + 7) % 7 || 7; return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+daysToWed, 0,0,0)); }
-  function firstOfNextMonthUTC(now=new Date()) { const y=now.getUTCFullYear(), m=now.getUTCMonth(); return new Date(Date.UTC(m===11?y+1:y, (m+1)%12, 1, 0,0,0)); }
-
-  function tickClocks() {
-    const now = new Date();
-    el("nextDaily").textContent   = eta(nextDailyUTC(now)-now);
-    el("nextWeekly").textContent  = eta(nextWeeklyUTC(now)-now);
-    el("nextMonthly").textContent = eta(firstOfNextMonthUTC(now)-now);
-    maybeReset("daily",   state.meta.lastDailyReset,   nextDailyUTC,   "lastDailyReset");
-    maybeReset("weekly",  state.meta.lastWeeklyReset,  nextWeeklyUTC,  "lastWeeklyReset");
-    maybeReset("monthly", state.meta.lastMonthlyReset, firstOfNextMonthUTC, "lastMonthlyReset");
-    requestAnimationFrame(tickClocks);
-  }
-  function maybeReset(scope, lastIso, nextFn, field) {
-    const now = new Date();
-    const last = lastIso ? new Date(lastIso) : new Date(0);
-    const next = nextFn(last);
-    if (now >= next) {
-      state.profiles[getP()].items[scope].forEach(x=>x.done=false);
-      state.meta[field] = now.toISOString();
-      save();
-      renderList();
-    }
-  }
-  function eta(ms) { if (ms<0) ms=0; const s=Math.floor(ms/1000); const h=String(Math.floor(s/3600)).padStart(2,"0"); const m=String(Math.floor((s%3600)/60)).padStart(2,"0"); const ss=String(s%60).padStart(2,"0"); return `${h}:${m}:${ss}`; }
-
-  /* ======= Helpers ======= */
-  function initDefault() {
-    return {
-      currentProfile: "0",
-      profiles: [emptyProfile("Main")],
-      meta: { lastDailyReset: new Date().toISOString(), lastWeeklyReset: new Date().toISOString(), lastMonthlyReset: new Date().toISOString() }
-    };
-  }
-  function emptyProfile(name) { return { name, items: { daily: [], weekly: [], monthly: [] } }; }
-  function getP(){ return +state.currentProfile; }
-  function getScopeArr(){ return state.profiles[getP()].items[currentScope]; }
-  function uid(){ return Math.random().toString(36).slice(2,9); }
-  function load(){ try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch { return null; } }
-  function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
-
-  /* boot */
-  refreshProfiles(); render(); tickClocks();
-  function render(){ refreshProfiles(); tabs.forEach(t => t.classList.toggle("active", t.dataset.scope===currentScope)); renderList(); }
-});
-</script>
-</body>
-</html>
+        const g = window[src.global];
+        if (g && typeof g === "object") { ds = g; use
