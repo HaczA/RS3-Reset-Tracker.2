@@ -25,17 +25,19 @@
   button.primary { background:var(--accent); color:#0a0f16; font-weight:600; }
   input[type="text"] { width:100%; padding:8px; border-radius:8px; border:1px solid #2a3140; background:#0f131a; color:#e9edf3; }
   .small { font-size:11px; color:var(--muted); }
+  #jsok { position:fixed; right:8px; top:8px; background:#2a3140; border-radius:10px; padding:4px 8px; font-size:12px; }
 </style>
 </head>
 <body>
+<div id="jsok">JS: loading…</div>
 <div class="app">
   <div class="card">
     <h1>RS3 Resets Tracker</h1>
     <div class="muted">Saves progress locally. Reset schedule uses <b>game time (UTC)</b>.</div>
     <div class="row" style="margin-top:8px;">
       <select id="profile"></select>
-      <button id="newProfile">New</button>
-      <button id="delProfile">Del</button>
+      <button id="newProfile" type="button">New</button>
+      <button id="delProfile" type="button">Del</button>
     </div>
     <div class="row">
       <div class="pill">Next daily: <span id="nextDaily">—</span></div>
@@ -53,13 +55,13 @@
 
     <div class="controls">
       <input id="addText" type="text" placeholder="Add task (optionally paste RS Wiki URL)"/>
-      <button id="addBtn" class="primary">Add</button>
-      <button id="clearDone">Clear Done</button>
+      <button id="addBtn" class="primary" type="button">Add</button>
+      <button id="clearDone" type="button">Clear Done</button>
     </div>
 
     <div class="controls" style="margin-top:6px;">
-      <button id="importDailyScape">Import from DailyScape</button>
-      <button id="resetScope">Reset This Tab</button>
+      <button id="importDailyScape" type="button">Import from DailyScape</button>
+      <button id="resetScope" type="button">Reset This Tab</button>
     </div>
 
     <div class="list" id="list"></div>
@@ -77,15 +79,22 @@
 </div>
 
 <script>
-/* Alt1 integration */
-try { if (window.alt1 && alt1.identifyAppUrl) { alt1.identifyAppUrl(location.origin + location.pathname.replace(/\\/[^\\/]*$/, '') + "/appconfig.json"); } } catch (e) {}
+/* Confirm JS is running */
+document.getElementById("jsok").textContent = "JS: OK";
+
+/* Alt1 integration — hardcoded for your repo */
+try {
+  if (window.alt1 && alt1.identifyAppUrl) {
+    alt1.identifyAppUrl("https://hacza.github.io/RS3-Reset-Tracker.2/appconfig.json");
+  }
+} catch (e) {}
 
 /* State */
 const LS_KEY = "rs3_resets_tracker_v1";
-const scopes = ["daily","weekly","monthly"];
 let state = load() || initDefault();
 let currentScope = "daily";
 
+/* Elements */
 const el = (id) => document.getElementById(id);
 const listEl = el("list");
 const tabs = Array.from(document.querySelectorAll(".tab"));
@@ -162,19 +171,17 @@ function renderList() {
 el("clearDone").onclick = () => { const a = getScopeArr(); for (let i=a.length-1;i>=0;i--) if (a[i].done) a.splice(i,1); save(); renderList(); };
 el("resetScope").onclick = () => { if (!confirm("Uncheck all items on this tab?")) return; getScopeArr().forEach(x=>x.done=false); save(); renderList(); };
 
-/* Import from DailyScape */
+/* Import from DailyScape (may be blocked by CORS — that's OK) */
 el("importDailyScape").onclick = async () => {
   try {
     const res = await fetch("https://dailyscape.github.io/", { mode: "cors" });
     const html = await res.text();
     const doc = new DOMParser().parseFromString(html, "text/html");
-
     const buckets = {
       daily:   pickSection(doc, ["Dailies","Daily Gathering"]),
       weekly:  pickSection(doc, ["Weeklies"]),
       monthly: pickSection(doc, ["Monthlies"])
     };
-
     ["daily","weekly","monthly"].forEach(scope => {
       const names = buckets[scope];
       const here  = state.profiles[getP()].items[scope];
@@ -188,7 +195,7 @@ el("importDailyScape").onclick = async () => {
     alert("Imported tasks from DailyScape (merged).");
   } catch (e) {
     console.error(e);
-    alert("Import failed. You can still paste tasks manually.");
+    alert("Import failed (likely CORS). You can still add tasks manually.");
   }
 };
 function pickSection(doc, headings) {
@@ -196,8 +203,7 @@ function pickSection(doc, headings) {
   headings.forEach(h => {
     const hEl = Array.from(doc.querySelectorAll("h2,h3,h4,h5")).find(x => x.textContent && x.textContent.toLowerCase().includes(h.toLowerCase()));
     if (!hEl) return;
-    let parent = hEl.parentElement;
-    if (!parent) return;
+    const parent = hEl.parentElement; if (!parent) return;
     const links = parent.querySelectorAll("a[href^='http']");
     links.forEach(a => {
       const name = a.textContent.trim();
@@ -210,8 +216,8 @@ function pickSection(doc, headings) {
 }
 
 /* Reset timers (UTC) */
-function nextDailyUTC(now=new Date())   { const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+1, 0,0,0)); return d; }
-function nextWeeklyUTC(now=new Date())  { const day = now.getUTCDay(); const daysToWed = (3 - day + 7) % 7 || 7; const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+daysToWed, 0,0,0)); return next; }
+function nextDailyUTC(now=new Date())   { return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+1, 0,0,0)); }
+function nextWeeklyUTC(now=new Date())  { const day = now.getUTCDay(); const daysToWed = (3 - day + 7) % 7 || 7; return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+daysToWed, 0,0,0)); }
 function firstOfNextMonthUTC(now=new Date()) { const y=now.getUTCFullYear(), m=now.getUTCMonth(); return new Date(Date.UTC(m===11?y+1:y, (m+1)%12, 1, 0,0,0)); }
 
 function tickClocks() {
@@ -245,9 +251,7 @@ function initDefault() {
     meta: { lastDailyReset: new Date().toISOString(), lastWeeklyReset: new Date().toISOString(), lastMonthlyReset: new Date().toISOString() }
   };
 }
-function emptyProfile(name) {
-  return { name, items: { daily: [], weekly: [], monthly: [] } };
-}
+function emptyProfile(name) { return { name, items: { daily: [], weekly: [], monthly: [] } }; }
 function getP(){ return +state.currentProfile; }
 function getScopeArr(){ return state.profiles[getP()].items[currentScope]; }
 function uid(){ return Math.random().toString(36).slice(2,9); }
