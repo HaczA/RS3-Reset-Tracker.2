@@ -1,0 +1,297 @@
+// ===== RS3 Reset Tracker — app.js (v17) =====
+
+// Badge: if you can see this change, JS truly loaded.
+document.getElementById("jsok").textContent = "JS: OK v17";
+
+// Alt1 (safe if not running inside Alt1)
+try {
+  if (window.alt1 && alt1.identifyAppUrl) {
+    alt1.identifyAppUrl("https://hacza.github.io/RS3-Reset-Tracker.2/appconfig.json");
+  }
+} catch {}
+
+// ===== State =====
+const LS_KEY = "rs3_resets_tracker_v1";
+let state = load() || initDefault();
+let currentScope = "daily";
+
+// ===== Elements =====
+const el = (id) => document.getElementById(id);
+const listEl = el("list");
+const tabs = Array.from(document.querySelectorAll(".tab"));
+const profileSel = el("profile");
+
+// ===== Profiles =====
+function refreshProfiles() {
+  profileSel.innerHTML = "";
+  state.profiles.forEach((p,i) => {
+    const opt = document.createElement("option");
+    opt.value = i; opt.textContent = p.name; profileSel.appendChild(opt);
+  });
+  profileSel.value = state.currentProfile;
+}
+el("newProfile").onclick = () => {
+  const name = prompt("Profile name?","Main");
+  if (!name) return;
+  state.profiles.push(emptyProfile(name));
+  state.currentProfile = String(state.profiles.length-1);
+  save(); refreshProfiles(); render();
+};
+el("delProfile").onclick = () => {
+  if (state.profiles.length <= 1) return alert("Keep at least one profile.");
+  if (!confirm("Delete current profile?")) return;
+  const idx = +state.currentProfile;
+  state.profiles.splice(idx,1);
+  state.currentProfile = "0";
+  save(); refreshProfiles(); render();
+};
+profileSel.onchange = () => { state.currentProfile = profileSel.value; save(); render(); };
+
+// ===== Tabs =====
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x=>x.classList.remove("active"));
+  t.classList.add("active");
+  currentScope = t.dataset.scope;
+  renderList();
+});
+
+// ===== Add & edit =====
+el("addBtn").onclick = addItem;
+el("addText").addEventListener("keydown", e => { if (e.key === "Enter") addItem(); });
+function addItem() {
+  const txt = el("addText").value.trim();
+  if (!txt) return;
+  const m = txt.match(/https?:\/\/\S+/);
+  const name = txt.replace(/https?:\/\/\S+/,"").trim() || txt;
+  const url = m ? m[0] : "";
+  getScopeArr().push({ id: uid(), name, url, done:false });
+  el("addText").value = "";
+  save(); renderList();
+}
+
+// ===== List render (checkbox + delete + drag) =====
+function renderList() {
+  const arr = getScopeArr();
+  listEl.innerHTML = "";
+  arr.forEach((it, idx) => {
+    const row = document.createElement("div");
+    row.className = "item"; row.draggable = true;
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = !!it.done;
+    cb.onchange = () => { it.done = cb.checked; save(); };
+
+    const name = document.createElement("input");
+    name.value = it.name;
+    Object.assign(name.style,{flex:"1",background:"transparent",color:"#e9edf3",border:"0",outline:"none"});
+    name.onchange = () => { it.name = name.value.trim(); save(); };
+
+    const link = document.createElement("a");
+    link.href = it.url || "#";
+    link.textContent = it.url ? "Wiki" : "";
+    link.target = "_blank";
+
+    const del = document.createElement("button");
+    del.textContent = "Del";
+    del.style.padding = "6px 8px";
+    del.onclick = () => {
+      if (confirm(`Delete "${it.name}"?`)) {
+        arr.splice(idx, 1);
+        save(); renderList();
+      }
+    };
+
+    row.append(cb, name, link, del);
+
+    // drag-to-reorder
+    row.addEventListener("dragstart", e => e.dataTransfer.setData("text/plain", idx));
+    row.addEventListener("dragover", e => e.preventDefault());
+    row.addEventListener("drop", e => {
+      e.preventDefault();
+      const from = +e.dataTransfer.getData("text/plain");
+      const to = idx;
+      if (from===to) return;
+      const a = arr[from];
+      arr.splice(from,1); arr.splice(to,0,a);
+      save(); renderList();
+    });
+
+    listEl.appendChild(row);
+  });
+}
+
+// ===== Import from DailyScape (robust crawler) =====
+document.getElementById("importDailyScape").onclick = async () => {
+  const BTN = document.getElementById("importDailyScape");
+  const prev = BTN.textContent; BTN.textContent = "Importing…"; BTN.disabled = true;
+
+  const SOURCES = [
+    "https://dailyscape.github.io/rsdata/rsdata.js",
+    "https://cdn.jsdelivr.net/gh/dailyscape/rsdata@main/rsdata.js",
+    "https://dailyscape.github.io/rsdata/rsapidatawikibulk.js",
+    "https://cdn.jsdelivr.net/gh/dailyscape/rsdata@main/rsapidatawikibulk.js"
+  ];
+
+  try {
+    let ds = null, used = null, errs = [];
+    for (const src of SOURCES) {
+      try { delete window.rsapidata; } catch {}
+      await new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = src + "?t=" + Date.now();
+        s.async = true;
+        s.onload = () => resolve();
+        s.onerror = () => reject(new Error("script load failed"));
+        document.head.appendChild(s);
+      }).catch(e => errs.push(src+" — "+e.message));
+
+      try { if (!ds && typeof rsapidata !== "undefined") ds = rsapidata; } catch {}
+      if (!ds && window.rsapidata) ds = window.rsapidata;
+      if (ds) { used = src; break; }
+    }
+    if (!ds) throw new Error("No dataset. Tried:\n" + errs.join("\n"));
+
+    // Crawl unknown shapes
+    const candidates = [];
+    const seen = new WeakSet();
+    const NAME_KEYS = ["name","item","title","label","task","activity","text"];
+    const URL_KEYS  = ["wiki","url","link","wikilink","w","page"];
+
+    const freqWord = (s) => {
+      const t = (s||"").toLowerCase();
+      if (t.includes("daily"))  return "daily";
+      if (t.includes("week"))   return "weekly";
+      if (t.includes("month"))  return "monthly";
+      return "";
+    };
+    const pullName = (o)=>{ for (const k of NAME_KEYS) if (typeof o?.[k]==="string" && o[k].trim()) return o[k].trim(); return ""; };
+    const pullUrl  = (o)=>{ for (const k of URL_KEYS)  if (typeof o?.[k]==="string" && o[k].trim()) return o[k].trim(); return ""; };
+    const infer    = (o)=>{ for (const [k,v] of Object.entries(o)){ const f=freqWord(k)|| (typeof v==="string"&&freqWord(v)); if (f) return f; }
+                            if (typeof o.frequency==="string") return freqWord(o.frequency);
+                            if (typeof o.interval==="string")  return freqWord(o.interval);
+                            if (typeof o.reset==="string")     return freqWord(o.reset);
+                            return ""; };
+
+    function walk(x, depth=0){
+      if (depth>6 || x==null) return;
+      if (Array.isArray(x)){ x.forEach(v=>walk(v, depth+1)); return; }
+      if (typeof x === "object"){
+        if (seen.has(x)) return; seen.add(x);
+        const nm = pullName(x);
+        if (nm) candidates.push({ name:nm, url:pullUrl(x), bucket:infer(x) });
+        for (const v of Object.values(x)) walk(v, depth+1);
+      }
+    }
+    walk(ds);
+
+    const daily=[], weekly=[], monthly=[], unknown=[];
+    const seenNames = new Set();
+    const pushU = (arr,t)=>{ const key=t.name.toLowerCase(); if (key && !seenNames.has(key)){ arr.push(t); seenNames.add(key);} };
+
+    candidates.forEach(t=>{
+      if (t.bucket==="daily") pushU(daily,t);
+      else if (t.bucket==="weekly") pushU(weekly,t);
+      else if (t.bucket==="monthly") pushU(monthly,t);
+      else unknown.push(t);
+    });
+
+    if (!daily.length && !weekly.length && !monthly.length) unknown.slice(0,80).forEach(t=>pushU(daily,t));
+
+    const found = { daily: daily.length, weekly: weekly.length, monthly: monthly.length };
+
+    // Merge into current profile
+    const added = { daily:0, weekly:0, monthly:0 };
+    const buckets = { daily, weekly, monthly };
+    ["daily","weekly","monthly"].forEach(scope => {
+      const incoming = buckets[scope] || [];
+      const here = state.profiles[getP()].items[scope];
+      const have2 = new Set(here.map(h => (h.name || "").toLowerCase()));
+      incoming.forEach(t => {
+        const key = (t.name || "").toLowerCase();
+        if (!key || have2.has(key)) return;
+        here.push({ id: uid(), name: t.name, url: t.url || "", done: false });
+        have2.add(key);
+        added[scope]++;
+      });
+    });
+
+    save(); renderList();
+
+    let msg = `Imported from DailyScape
+Found: ${found.daily} daily, ${found.weekly} weekly, ${found.monthly} monthly.
+Added: ${added.daily} daily, ${added.weekly} weekly, ${added.monthly} monthly.
+Source: ${used}`;
+
+    if (!found.daily && !found.weekly && !found.monthly) {
+      const sample = candidates.slice(0,12).map(x=>x.name).filter(Boolean).join(", ") || "(no names detected)";
+      msg += `
+
+Diagnostics:
+Saw ${candidates.length} candidate objects.
+Sample names: ${sample}`;
+    } else {
+      msg += `
+
+Samples:
+Daily: ${daily[0]?.name||"(none)"} | Weekly: ${weekly[0]?.name||"(none)"} | Monthly: ${monthly[0]?.name||"(none)"}`;
+    }
+    alert(msg);
+
+  } catch (e) {
+    console.error(e);
+    alert("Import failed: " + e.message);
+  } finally {
+    BTN.textContent = prev; BTN.disabled = false;
+  }
+};
+
+// ===== Timers (UTC) =====
+function nextDailyUTC(now=new Date())   { return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+1, 0,0,0)); }
+function nextWeeklyUTC(now=new Date())  { const day = now.getUTCDay(); const daysToWed = (3 - day + 7) % 7 || 7; return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+daysToWed, 0,0,0)); }
+function firstOfNextMonthUTC(now=new Date()) { const y=now.getUTCFullYear(), m=now.getUTCMonth(); return new Date(Date.UTC(m===11?y+1:y, (m+1)%12, 1, 0,0,0)); }
+
+function tickClocks() {
+  const now = new Date();
+  el("nextDaily").textContent   = eta(nextDailyUTC(now)-now);
+  el("nextWeekly").textContent  = eta(nextWeeklyUTC(now)-now);
+  el("nextMonthly").textContent = eta(firstOfNextMonthUTC(now)-now);
+  maybeReset("daily",   state.meta.lastDailyReset,   nextDailyUTC,   "lastDailyReset");
+  maybeReset("weekly",  state.meta.lastWeeklyReset,  nextWeeklyUTC,  "lastWeeklyReset");
+  maybeReset("monthly", state.meta.lastMonthlyReset, firstOfNextMonthUTC, "lastMonthlyReset");
+  requestAnimationFrame(tickClocks);
+}
+function maybeReset(scope, lastIso, nextFn, field) {
+  const now = new Date();
+  const last = lastIso ? new Date(lastIso) : new Date(0);
+  const next = nextFn(last);
+  if (now >= next) {
+    state.profiles[getP()].items[scope].forEach(x=>x.done=false);
+    state.meta[field] = now.toISOString();
+    save();
+    renderList();
+  }
+}
+function eta(ms) { if (ms<0) ms=0; const s=Math.floor(ms/1000); const h=String(Math.floor(s/3600)).padStart(2,"0"); const m=String(Math.floor((s%3600)/60)).padStart(2,"0"); const ss=String(s%60).padStart(2,"0"); return `${h}:${m}:${ss}`; }
+
+// ===== Helpers =====
+function initDefault() {
+  return {
+    currentProfile: "0",
+    profiles: [emptyProfile("Main")],
+    meta: { lastDailyReset: new Date().toISOString(), lastWeeklyReset: new Date().toISOString(), lastMonthlyReset: new Date().toISOString() }
+  };
+}
+function emptyProfile(name) { return { name, items: { daily: [], weekly: [], monthly: [] } }; }
+function getP(){ return +state.currentProfile; }
+function getScopeArr(){ return state.profiles[getP()].items[currentScope]; }
+function uid(){ return Math.random().toString(36).slice(2,9); }
+function load(){ try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch { return null; } }
+function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+
+// Boot
+refreshProfiles(); render(); tickClocks();
+function render(){ refreshProfiles(); tabs.forEach(t => t.classList.toggle("active", t.dataset.scope===currentScope)); renderList(); }
+
+// Extra buttons
+document.getElementById("clearDone").onclick = () => { getScopeArr().forEach(x=>x.done=false); save(); renderList(); };
+document.getElementById("resetScope").onclick = () => { if (confirm("Clear all tasks on this tab?")) { state.profiles[getP()].items[currentScope] = []; save(); renderList(); } };
