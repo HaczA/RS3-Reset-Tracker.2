@@ -1,13 +1,43 @@
-{
-  "daily": [
-    { "name": "Vis wax (Rune Goldberg)", "url": "https://runescape.wiki/w/Runespan#Rune_Goldberg_Machine" },
-    { "name": "Reaper assignment", "url": "https://runescape.wiki/w/Reaper_Assignment" }
-  ],
-  "weekly": [
-    { "name": "Penguin Hide and Seek", "url": "https://runescape.wiki/w/Penguin_Hide_and_Seek" },
-    { "name": "Tears of Guthix", "url": "https://runescape.wiki/w/Tears_of_Guthix" }
-  ],
-  "monthly": [
-    { "name": "Giant Oyster", "url": "https://runescape.wiki/w/Giant_oyster" }
-  ]
-}
+(async () => {
+  // Load DailyScape's data file into the page
+  try {
+    const js = await fetch("/rsdata/rsdata.js", {cache:"no-store"}).then(r=>r.text());
+    // Evaluate to create `rsapidata` in this page
+    (0, eval)(js);
+  } catch (e) {
+    alert("Couldn't load rsdata.js. Stay on dailyscape.github.io and try again.");
+    throw e;
+  }
+
+  const D = (window.rsapidata || {});
+  // Helper: normalize list of {name,url}
+  const norm = (arr=[]) => arr.map(x => ({
+    name: x.name || x.item || x.title || "",
+    url:  x.wiki || x.url || x.link || ""
+  })).filter(t => t.name);
+
+  // DailyScape has Dailies and a separate "Daily Gathering".
+  // We merge Gathering into 'daily' so your app's three tabs still fit.
+  const dailyAll = [...norm(D.daily), ...norm(D.gathering || D["dailyGathering"])];
+
+  const out = {
+    daily:   dedupeByName(dailyAll),
+    weekly:  dedupeByName(norm(D.weeklies || D.weekly)),
+    monthly: dedupeByName(norm(D.monthlies || D.monthly))
+  };
+
+  function dedupeByName(arr){
+    const seen = new Set();
+    return arr.filter(t => {
+      const key = t.name.toLowerCase().trim();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  const json = JSON.stringify(out, null, 2);
+  console.log(json);
+  await navigator.clipboard.writeText(json).catch(()=>{});
+  alert("✅ tasks.json copied to clipboard.\nPaste it into your repo as tasks.json");
+})();
