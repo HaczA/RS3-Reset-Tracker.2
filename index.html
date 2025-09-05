@@ -1,7 +1,7 @@
-// RS3 Reset Tracker — app.js (v18 strict import)
+// RS3 Reset Tracker — app.js (v19 strict import)
 
 // Badge so you know JS actually ran
-document.getElementById("jsok").textContent = "JS: OK v18";
+document.getElementById("jsok").textContent = "JS: OK v19";
 
 // Alt1 (safe if not present)
 try { if (window.alt1 && alt1.identifyAppUrl) { alt1.identifyAppUrl("https://hacza.github.io/RS3-Reset-Tracker.2/appconfig.json"); } } catch {}
@@ -286,3 +286,5 @@ function render(){ refreshProfiles(); tabs.forEach(t => t.classList.toggle("acti
 // Extra buttons
 document.getElementById("clearDone").onclick = () => { getScopeArr().forEach(x=>x.done=false); save(); renderList(); };
 document.getElementById("resetScope").onclick = () => { if (confirm("Clear all tasks on this tab?")) { state.profiles[getP()].items[currentScope] = []; save(); renderList(); } };
+  <script src="app.js?v=19"></script>
+
