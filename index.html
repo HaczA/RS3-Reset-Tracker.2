@@ -87,17 +87,17 @@ try {
   }
 } catch (e) {}
 
-/* State */
+/* ---------- State ---------- */
 const LS_KEY = "rs3_resets_tracker_v1";
 let state = load() || initDefault();
 let currentScope = "daily";
 
-/* Elements */
+/* ---------- Elements ---------- */
 const el = (id) => document.getElementById(id);
 const listEl = el("list");
 const tabs = Array.from(document.querySelectorAll(".tab"));
 
-/* Profiles */
+/* ---------- Profiles ---------- */
 const profileSel = el("profile");
 function refreshProfiles() {
   profileSel.innerHTML = "";
@@ -124,7 +124,7 @@ el("delProfile").onclick = () => {
 };
 profileSel.onchange = () => { state.currentProfile = profileSel.value; save(); render(); };
 
-/* Tabs */
+/* ---------- Tabs ---------- */
 tabs.forEach(t => t.onclick = () => {
   tabs.forEach(x=>x.classList.remove("active"));
   t.classList.add("active");
@@ -132,7 +132,7 @@ tabs.forEach(t => t.onclick = () => {
   renderList();
 });
 
-/* Add & edit */
+/* ---------- Add & edit ---------- */
 el("addBtn").onclick = addItem;
 el("addText").addEventListener("keydown", e => { if (e.key === "Enter") addItem(); });
 function addItem() {
@@ -146,7 +146,7 @@ function addItem() {
   save(); renderList();
 }
 
-/* List render (checkbox + delete + drag) */
+/* ---------- List render (checkbox + delete + drag) ---------- */
 function renderList() {
   const arr = getScopeArr();
   listEl.innerHTML = "";
@@ -180,6 +180,7 @@ function renderList() {
 
     row.append(cb, name, link, del);
 
+    // drag-to-reorder
     row.addEventListener("dragstart", e => e.dataTransfer.setData("text/plain", idx));
     row.addEventListener("dragover", e => e.preventDefault());
     row.addEventListener("drop", e => {
@@ -196,19 +197,35 @@ function renderList() {
   });
 }
 
-/* Import EVERYTHING from DailyScape (via public read-only mirror) */
+/* ---------- Import EVERYTHING from DailyScape ---------- */
+/* This fetches the official data file (rsdata.js) from GitHub/CDNs, parses rsapidata, and merges all tasks. */
 document.getElementById("importDailyScape").onclick = async () => {
   const BTN = document.getElementById("importDailyScape");
   const prev = BTN.textContent; BTN.textContent = "Importing…"; BTN.disabled = true;
+
+  const SOURCES = [
+    "https://raw.githubusercontent.com/dailyscape/rsdata/main/rsdata.js",
+    "https://cdn.jsdelivr.net/gh/dailyscape/rsdata@main/rsdata.js",
+    "https://raw.githack.com/dailyscape/rsdata/main/rsdata.js",
+    "https://cdn.statically.io/gh/dailyscape/rsdata/main/rsdata.js"
+  ];
+
   try {
-    // DailyScape's master data: rsdata/rsdata.js -> var rsapidata = {...}
-    const url = "https://r.jina.ai/https://dailyscape.github.io/rsdata/rsdata.js";
-    const raw = await fetch(url, { cache: "no-store" }).then(r => r.text());
+    let raw = null, used = null, lastErr = null;
+    for (const base of SOURCES) {
+      const url = base + "?t=" + Date.now(); // bust cache
+      try {
+        const r = await fetch(url, { cache: "no-store" });
+        if (!r.ok) throw new Error(r.status + " " + r.statusText);
+        raw = await r.text(); used = base; break;
+      } catch (e) { lastErr = e; }
+    }
+    if (!raw) throw new Error("All sources failed: " + (lastErr && lastErr.message));
 
-    const match = raw.match(/rsapidata\s*=\s*({[\s\S]*?});/);
-    if (!match) throw new Error("Couldn't find rsapidata in rsdata.js");
+    const m = raw.match(/(?:var\s+)?rsapidata\s*=\s*({[\s\S]*?});/);
+    if (!m) throw new Error("Couldn't find rsapidata in rsdata.js (" + used + ")");
 
-    const ds = Function('"use strict"; return (' + match[1] + ')')();
+    const ds = Function('"use strict"; return (' + m[1] + ')')();
 
     const norm = (arr = []) => arr.map(x => ({
       name: (x.name || x.item || x.title || "").trim(),
@@ -221,6 +238,7 @@ document.getElementById("importDailyScape").onclick = async () => {
 
     const buckets = { daily: dailyAll, weekly: weeklyAll, monthly: monthlyAll };
 
+    const added = { daily:0, weekly:0, monthly:0 };
     ["daily","weekly","monthly"].forEach(scope => {
       const incoming = buckets[scope] || [];
       const here = state.profiles[getP()].items[scope];
@@ -230,20 +248,21 @@ document.getElementById("importDailyScape").onclick = async () => {
         if (!key || have.has(key)) return;
         here.push({ id: uid(), name: t.name, url: t.url || "", done: false });
         have.add(key);
+        added[scope]++;
       });
     });
 
     save(); renderList();
-    alert("Imported the full DailyScape set into all tabs.");
+    alert(`Imported from DailyScape\nAdded: ${added.daily} daily, ${added.weekly} weekly, ${added.monthly} monthly.`);
   } catch (e) {
     console.error(e);
-    alert("Import failed. Open F12 → Console and tell me the first red line.");
+    alert("Import failed: " + e.message);
   } finally {
     BTN.textContent = prev; BTN.disabled = false;
   }
 };
 
-/* Reset timers (UTC) */
+/* ---------- Reset timers (UTC) ---------- */
 function nextDailyUTC(now=new Date())   { return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+1, 0,0,0)); }
 function nextWeeklyUTC(now=new Date())  { const day = now.getUTCDay(); const daysToWed = (3 - day + 7) % 7 || 7; return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+daysToWed, 0,0,0)); }
 function firstOfNextMonthUTC(now=new Date()) { const y=now.getUTCFullYear(), m=now.getUTCMonth(); return new Date(Date.UTC(m===11?y+1:y, (m+1)%12, 1, 0,0,0)); }
@@ -265,13 +284,12 @@ function maybeReset(scope, lastIso, nextFn, field) {
   if (now >= next) {
     state.profiles[getP()].items[scope].forEach(x=>x.done=false);
     state.meta[field] = now.toISOString();
-    save();
-    renderList();
+    save(); renderList();
   }
 }
 function eta(ms) { if (ms<0) ms=0; const s=Math.floor(ms/1000); const h=String(Math.floor(s/3600)).padStart(2,"0"); const m=String(Math.floor((s%3600)/60)).padStart(2,"0"); const ss=String(s%60).padStart(2,"0"); return `${h}:${m}:${ss}`; }
 
-/* Helpers */
+/* ---------- Helpers ---------- */
 function initDefault() {
   return {
     currentProfile: "0",
@@ -286,7 +304,7 @@ function uid(){ return Math.random().toString(36).slice(2,9); }
 function load(){ try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch { return null; } }
 function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
 
-/* Boot */
+/* ---------- Boot ---------- */
 refreshProfiles();
 render();
 function render(){ refreshProfiles(); tabs.forEach(t => t.classList.toggle("active", t.dataset.scope===currentScope)); renderList(); }
