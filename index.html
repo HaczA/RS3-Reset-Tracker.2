@@ -1,0 +1,264 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RS3 Resets Tracker</title>
+<style>
+  :root { --bg:#101014; --panel:#191c22; --muted:#9aa1ad; --accent:#6ecbff; }
+  body { margin:0; font-family:system-ui, Segoe UI, Arial; background:var(--bg); color:#e9edf3; }
+  .app { width:320px; padding:14px; }
+  .card { background:var(--panel); border-radius:14px; box-shadow:0 10px 30px rgba(0,0,0,.4); padding:14px; margin-bottom:12px; }
+  h1 { font-size:18px; margin:0 0 10px; }
+  .tabs { display:flex; gap:6px; margin:8px 0 10px; }
+  .tab { flex:1; padding:8px; text-align:center; border-radius:10px; cursor:pointer; background:#22262f; }
+  .tab.active { outline:2px solid var(--accent); }
+  .row { display:flex; gap:8px; align-items:center; }
+  .row > * { flex:1; }
+  .pill { font-size:12px; padding:4px 8px; border-radius:999px; background:#232836; color:var(--muted); }
+  .list { display:grid; gap:6px; margin-top:8px; }
+  .item { display:flex; align-items:center; gap:8px; background:#141820; padding:8px; border-radius:10px; }
+  .item a { color:#cfe7ff; text-decoration:none; }
+  .muted { color:var(--muted); font-size:12px; }
+  .controls { display:flex; gap:8px; }
+  button { padding:8px 10px; border:0; border-radius:10px; background:#2a3140; color:#e9edf3; cursor:pointer; }
+  button.primary { background:var(--accent); color:#0a0f16; font-weight:600; }
+  input[type="text"] { width:100%; padding:8px; border-radius:8px; border:1px solid #2a3140; background:#0f131a; color:#e9edf3; }
+  .small { font-size:11px; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="card">
+    <h1>RS3 Resets Tracker</h1>
+    <div class="muted">Saves progress locally. Reset schedule uses <b>game time (UTC)</b>.</div>
+    <div class="row" style="margin-top:8px;">
+      <select id="profile"></select>
+      <button id="newProfile">New</button>
+      <button id="delProfile">Del</button>
+    </div>
+    <div class="row">
+      <div class="pill">Next daily: <span id="nextDaily">—</span></div>
+      <div class="pill">Weekly: <span id="nextWeekly">—</span></div>
+      <div class="pill">Monthly: <span id="nextMonthly">—</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="tabs">
+      <div class="tab active" data-scope="daily">Dailies</div>
+      <div class="tab" data-scope="weekly">Weeklies</div>
+      <div class="tab" data-scope="monthly">Monthlies</div>
+    </div>
+
+    <div class="controls">
+      <input id="addText" type="text" placeholder="Add task (optionally paste RS Wiki URL)"/>
+      <button id="addBtn" class="primary">Add</button>
+      <button id="clearDone">Clear Done</button>
+    </div>
+
+    <div class="controls" style="margin-top:6px;">
+      <button id="importDailyScape">Import from DailyScape</button>
+      <button id="resetScope">Reset This Tab</button>
+    </div>
+
+    <div class="list" id="list"></div>
+    <div class="small" style="margin-top:8px;">
+      Tip: Click the task name to edit. Drag to reorder (browser only). Progress auto-resets at UTC boundaries:
+      dailies 00:00 UTC; weeklies 00:00 UTC Wednesdays; monthlies 00:00 UTC day 1.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="small">
+      Sources: DailyScape (task lists, ideas) and known RS reset times.
+    </div>
+  </div>
+</div>
+
+<script>
+/* Alt1 integration */
+try { if (window.alt1 && alt1.identifyAppUrl) { alt1.identifyAppUrl(location.origin + location.pathname.replace(/\\/[^\\/]*$/, '') + "/appconfig.json"); } } catch (e) {}
+
+/* State */
+const LS_KEY = "rs3_resets_tracker_v1";
+const scopes = ["daily","weekly","monthly"];
+let state = load() || initDefault();
+let currentScope = "daily";
+
+const el = (id) => document.getElementById(id);
+const listEl = el("list");
+const tabs = Array.from(document.querySelectorAll(".tab"));
+
+/* Profiles */
+const profileSel = el("profile");
+function refreshProfiles() {
+  profileSel.innerHTML = "";
+  state.profiles.forEach((p,i) => {
+    const opt = document.createElement("option");
+    opt.value = i; opt.textContent = p.name; profileSel.appendChild(opt);
+  });
+  profileSel.value = state.currentProfile;
+}
+el("newProfile").onclick = () => {
+  const name = prompt("Profile name?","Main");
+  if (!name) return;
+  state.profiles.push(emptyProfile(name));
+  state.currentProfile = String(state.profiles.length-1);
+  save(); refreshProfiles(); render();
+};
+el("delProfile").onclick = () => {
+  if (state.profiles.length <= 1) return alert("Keep at least one profile.");
+  if (!confirm("Delete current profile?")) return;
+  const idx = +state.currentProfile;
+  state.profiles.splice(idx,1);
+  state.currentProfile = "0";
+  save(); refreshProfiles(); render();
+};
+profileSel.onchange = () => { state.currentProfile = profileSel.value; save(); render(); };
+
+/* Tabs */
+tabs.forEach(t => t.onclick = () => { tabs.forEach(x=>x.classList.remove("active")); t.classList.add("active"); currentScope = t.dataset.scope; renderList(); });
+
+/* Add & edit */
+el("addBtn").onclick = addItem;
+el("addText").addEventListener("keydown", e => { if (e.key === "Enter") addItem(); });
+function addItem() {
+  const txt = el("addText").value.trim();
+  if (!txt) return;
+  const m = txt.match(/https?:\/\/\S+/);
+  const name = txt.replace(/https?:\/\/\S+/,"").trim() || txt;
+  const url = m ? m[0] : "";
+  getScopeArr().push({ id: uid(), name, url, done:false });
+  el("addText").value = "";
+  save(); renderList();
+}
+
+/* List render */
+function renderList() {
+  const arr = getScopeArr();
+  listEl.innerHTML = "";
+  arr.forEach((it, idx) => {
+    const row = document.createElement("div");
+    row.className = "item"; row.draggable = true;
+
+    const cb = document.createElement("input"); cb.type="checkbox"; cb.checked = !!it.done;
+    cb.onchange = () => { it.done = cb.checked; save(); };
+    const name = document.createElement("input");
+    name.value = it.name;
+    name.style.flex="1"; name.style.background="transparent"; name.style.color="#e9edf3"; name.style.border="0"; name.style.outline="none";
+    name.onchange = () => { it.name = name.value.trim(); save(); };
+    const link = document.createElement("a"); link.href = it.url || "#"; link.textContent = it.url ? "Wiki" : ""; link.target="_blank";
+
+    row.appendChild(cb); row.appendChild(name); row.appendChild(link);
+    row.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", idx); });
+    row.addEventListener("dragover", e => e.preventDefault());
+    row.addEventListener("drop", e => { e.preventDefault(); const from = +e.dataTransfer.getData("text/plain"); const to = idx;
+      if (from===to) return; const a=arr[from]; arr.splice(from,1); arr.splice(to,0,a); save(); renderList();
+    });
+    listEl.appendChild(row);
+  });
+}
+el("clearDone").onclick = () => { const a = getScopeArr(); for (let i=a.length-1;i>=0;i--) if (a[i].done) a.splice(i,1); save(); renderList(); };
+el("resetScope").onclick = () => { if (!confirm("Uncheck all items on this tab?")) return; getScopeArr().forEach(x=>x.done=false); save(); renderList(); };
+
+/* Import from DailyScape */
+el("importDailyScape").onclick = async () => {
+  try {
+    const res = await fetch("https://dailyscape.github.io/", { mode: "cors" });
+    const html = await res.text();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+
+    const buckets = {
+      daily:   pickSection(doc, ["Dailies","Daily Gathering"]),
+      weekly:  pickSection(doc, ["Weeklies"]),
+      monthly: pickSection(doc, ["Monthlies"])
+    };
+
+    ["daily","weekly","monthly"].forEach(scope => {
+      const names = buckets[scope];
+      const here  = state.profiles[getP()].items[scope];
+      names.forEach(t => {
+        if (!here.some(h => h.name.toLowerCase() === t.name.toLowerCase())) {
+          here.push(t);
+        }
+      });
+    });
+    save(); renderList();
+    alert("Imported tasks from DailyScape (merged).");
+  } catch (e) {
+    console.error(e);
+    alert("Import failed. You can still paste tasks manually.");
+  }
+};
+function pickSection(doc, headings) {
+  const out = [];
+  headings.forEach(h => {
+    const hEl = Array.from(doc.querySelectorAll("h2,h3,h4,h5")).find(x => x.textContent && x.textContent.toLowerCase().includes(h.toLowerCase()));
+    if (!hEl) return;
+    let parent = hEl.parentElement;
+    if (!parent) return;
+    const links = parent.querySelectorAll("a[href^='http']");
+    links.forEach(a => {
+      const name = a.textContent.trim();
+      if (name && !out.some(x=>x.name.toLowerCase()===name.toLowerCase())) {
+        out.push({ id: uid(), name, url: a.href, done:false });
+      }
+    });
+  });
+  return out;
+}
+
+/* Reset timers (UTC) */
+function nextDailyUTC(now=new Date())   { const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+1, 0,0,0)); return d; }
+function nextWeeklyUTC(now=new Date())  { const day = now.getUTCDay(); const daysToWed = (3 - day + 7) % 7 || 7; const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+daysToWed, 0,0,0)); return next; }
+function firstOfNextMonthUTC(now=new Date()) { const y=now.getUTCFullYear(), m=now.getUTCMonth(); return new Date(Date.UTC(m===11?y+1:y, (m+1)%12, 1, 0,0,0)); }
+
+function tickClocks() {
+  const now = new Date();
+  el("nextDaily").textContent   = eta(nextDailyUTC(now)-now);
+  el("nextWeekly").textContent  = eta(nextWeeklyUTC(now)-now);
+  el("nextMonthly").textContent = eta(firstOfNextMonthUTC(now)-now);
+  maybeReset("daily",   state.meta.lastDailyReset,   nextDailyUTC,   "lastDailyReset");
+  maybeReset("weekly",  state.meta.lastWeeklyReset,  nextWeeklyUTC,  "lastWeeklyReset");
+  maybeReset("monthly", state.meta.lastMonthlyReset, firstOfNextMonthUTC, "lastMonthlyReset");
+  requestAnimationFrame(tickClocks);
+}
+function maybeReset(scope, lastIso, nextFn, field) {
+  const now = new Date();
+  const last = lastIso ? new Date(lastIso) : new Date(0);
+  const next = nextFn(last);
+  if (now >= next) {
+    state.profiles[getP()].items[scope].forEach(x=>x.done=false);
+    state.meta[field] = now.toISOString();
+    save();
+    renderList();
+  }
+}
+function eta(ms) { if (ms<0) ms=0; const s=Math.floor(ms/1000); const h=String(Math.floor(s/3600)).padStart(2,"0"); const m=String(Math.floor((s%3600)/60)).padStart(2,"0"); const ss=String(s%60).padStart(2,"0"); return `${h}:${m}:${ss}`; }
+
+/* Helpers */
+function initDefault() {
+  return {
+    currentProfile: "0",
+    profiles: [emptyProfile("Main")],
+    meta: { lastDailyReset: new Date().toISOString(), lastWeeklyReset: new Date().toISOString(), lastMonthlyReset: new Date().toISOString() }
+  };
+}
+function emptyProfile(name) {
+  return { name, items: { daily: [], weekly: [], monthly: [] } };
+}
+function getP(){ return +state.currentProfile; }
+function getScopeArr(){ return state.profiles[getP()].items[currentScope]; }
+function uid(){ return Math.random().toString(36).slice(2,9); }
+function load(){ try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch { return null; } }
+function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+
+/* Boot */
+refreshProfiles();
+render();
+function render(){ refreshProfiles(); tabs.forEach(t => t.classList.toggle("active", t.dataset.scope===currentScope)); renderList(); }
+tickClocks();
+</script>
+</body>
+</html>
