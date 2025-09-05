@@ -1,0 +1,13 @@
+{
+  "daily": [
+    { "name": "Vis wax (Rune Goldberg)", "url": "https://runescape.wiki/w/Runespan#Rune_Goldberg_Machine" },
+    { "name": "Reaper assignment", "url": "https://runescape.wiki/w/Reaper_Assignment" }
+  ],
+  "weekly": [
+    { "name": "Penguin Hide and Seek", "url": "https://runescape.wiki/w/Penguin_Hide_and_Seek" },
+    { "name": "Tears of Guthix", "url": "https://runescape.wiki/w/Tears_of_Guthix" }
+  ],
+  "monthly": [
+    { "name": "Giant Oyster", "url": "https://runescape.wiki/w/Giant_oyster" }
+  ]
+}
