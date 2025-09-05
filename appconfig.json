@@ -1,13 +1,8 @@
 {
   "appName": "RS3 Resets Tracker",
   "description": "Track dailies, weeklies, monthlies; auto-resets; import from DailyScape.",
-  "appUrl": "https://hacza.github.io/RS3-Reset-Tracker.2/",
-  "configUrl": "https://hacza.github.io/RS3-Reset-Tracker.2/",
-  "iconUrl": "https://hacza.github.io/RS3-Reset-Tracker.2/",
-  "activators": [
-    "Daily reset",
-    "Weekly reset",
-    "Monthly reset",
-    "Dailyscape"
-  ]
+  "appUrl": "https://hacza.github.io/RS3-Reset-Tracker.2/index.html",
+  "configUrl": "https://hacza.github.io/RS3-Reset-Tracker.2/appconfig.json",
+  "iconUrl": "https://hacza.github.io/RS3-Reset-Tracker.2/icon.png",
+  "activators": ["Daily reset", "Weekly reset", "Monthly reset", "Dailyscape"]
 }
