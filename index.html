@@ -1,11 +1,3 @@
-<script>
-try {
-  if (window.alt1 && alt1.identifyAppUrl) {
-    alt1.identifyAppUrl("https://hacza.github.io/RS3-Reset-Tracker.2/appconfig.json");
-  }
-} catch (e) {}
-</script>
-
 <!doctype html>
 <html>
 <head>
@@ -80,9 +72,7 @@ try {
   </div>
 
   <div class="card">
-    <div class="small">
-      Sources: DailyScape (task lists, ideas) and known RS reset times.
-    </div>
+    <div class="small">Sources: DailyScape (task lists, ideas) and known RS reset times.</div>
   </div>
 </div>
 
@@ -90,7 +80,7 @@ try {
 /* Confirm JS is running */
 document.getElementById("jsok").textContent = "JS: OK";
 
-/* Alt1 integration — hardcoded for your repo */
+/* Alt1 integration — hardcoded for this repo */
 try {
   if (window.alt1 && alt1.identifyAppUrl) {
     alt1.identifyAppUrl("https://hacza.github.io/RS3-Reset-Tracker.2/appconfig.json");
@@ -135,7 +125,12 @@ el("delProfile").onclick = () => {
 profileSel.onchange = () => { state.currentProfile = profileSel.value; save(); render(); };
 
 /* Tabs */
-tabs.forEach(t => t.onclick = () => { tabs.forEach(x=>x.classList.remove("active")); t.classList.add("active"); currentScope = t.dataset.scope; renderList(); });
+tabs.forEach(t => t.onclick = () => {
+  tabs.forEach(x=>x.classList.remove("active"));
+  t.classList.add("active");
+  currentScope = t.dataset.scope;
+  renderList();
+});
 
 /* Add & edit */
 el("addBtn").onclick = addItem;
@@ -151,7 +146,7 @@ function addItem() {
   save(); renderList();
 }
 
-/* List render */
+/* List render (checkbox + delete + drag) */
 function renderList() {
   const arr = getScopeArr();
   listEl.innerHTML = "";
@@ -165,11 +160,7 @@ function renderList() {
 
     const name = document.createElement("input");
     name.value = it.name;
-    name.style.flex = "1";
-    name.style.background = "transparent";
-    name.style.color = "#e9edf3";
-    name.style.border = "0";
-    name.style.outline = "none";
+    Object.assign(name.style,{flex:"1",background:"transparent",color:"#e9edf3",border:"0",outline:"none"});
     name.onchange = () => { it.name = name.value.trim(); save(); };
 
     const link = document.createElement("a");
@@ -187,22 +178,17 @@ function renderList() {
       }
     };
 
-    row.appendChild(cb);
-    row.appendChild(name);
-    row.appendChild(link);
-    row.appendChild(del);
+    row.append(cb, name, link, del);
 
-    // drag to reorder
-    row.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", idx); });
+    row.addEventListener("dragstart", e => e.dataTransfer.setData("text/plain", idx));
     row.addEventListener("dragover", e => e.preventDefault());
     row.addEventListener("drop", e => {
       e.preventDefault();
       const from = +e.dataTransfer.getData("text/plain");
       const to = idx;
-      if (from === to) return;
+      if (from===to) return;
       const a = arr[from];
-      arr.splice(from,1);
-      arr.splice(to,0,a);
+      arr.splice(from,1); arr.splice(to,0,a);
       save(); renderList();
     });
 
@@ -210,43 +196,31 @@ function renderList() {
   });
 }
 
-el("clearDone").onclick = () => { const a = getScopeArr(); for (let i=a.length-1;i>=0;i--) if (a[i].done) a.splice(i,1); save(); renderList(); };
-el("resetScope").onclick = () => { if (!confirm("Uncheck all items on this tab?")) return; getScopeArr().forEach(x=>x.done=false); save(); renderList(); };
-
-<script>
-<script>
-// --- LIVE IMPORT FROM DAILYSCAPE (no CORS issues) ---
+/* Import EVERYTHING from DailyScape (via public read-only mirror) */
 document.getElementById("importDailyScape").onclick = async () => {
   const BTN = document.getElementById("importDailyScape");
   const prev = BTN.textContent; BTN.textContent = "Importing…"; BTN.disabled = true;
   try {
-    // Pull the canonical dataset (rsapidata) through a read-only mirror
-    // DailyScape keeps all tasks in rsdata.js -> var rsapidata = { daily, gathering, weeklies, monthlies, ... }
-    // We fetch it and eval ONLY the object literal.
+    // DailyScape's master data: rsdata/rsdata.js -> var rsapidata = {...}
     const url = "https://r.jina.ai/https://dailyscape.github.io/rsdata/rsdata.js";
     const raw = await fetch(url, { cache: "no-store" }).then(r => r.text());
 
-    // Extract the object literal assigned to rsapidata
     const match = raw.match(/rsapidata\s*=\s*({[\s\S]*?});/);
     if (!match) throw new Error("Couldn't find rsapidata in rsdata.js");
 
-    // Safely evaluate just the object literal
     const ds = Function('"use strict"; return (' + match[1] + ')')();
 
-    // Normalize name+url pairs from various sections
     const norm = (arr = []) => arr.map(x => ({
       name: (x.name || x.item || x.title || "").trim(),
       url:  (x.wiki || x.url || x.link || "").trim()
     })).filter(t => t.name);
 
-    // DailyScape splits regular Dailies and "Daily Gathering" — merge both under our "daily" tab
     const dailyAll   = [...norm(ds.daily), ...norm(ds.gathering || ds.dailyGathering)];
     const weeklyAll  = norm(ds.weeklies || ds.weekly);
     const monthlyAll = norm(ds.monthlies || ds.monthly);
 
     const buckets = { daily: dailyAll, weekly: weeklyAll, monthly: monthlyAll };
 
-    // Merge into current profile without duplicates (by lowercase name)
     ["daily","weekly","monthly"].forEach(scope => {
       const incoming = buckets[scope] || [];
       const here = state.profiles[getP()].items[scope];
@@ -263,15 +237,11 @@ document.getElementById("importDailyScape").onclick = async () => {
     alert("Imported the full DailyScape set into all tabs.");
   } catch (e) {
     console.error(e);
-    alert("Import failed. If it persists, tell me the first red error from F12 → Console.");
+    alert("Import failed. Open F12 → Console and tell me the first red line.");
   } finally {
     BTN.textContent = prev; BTN.disabled = false;
   }
 };
-</script>
-
-</script>
-
 
 /* Reset timers (UTC) */
 function nextDailyUTC(now=new Date())   { return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+1, 0,0,0)); }
