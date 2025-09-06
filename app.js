@@ -1,444 +1,411 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RS3 Resets Tracker</title>
-  <style>
-    :root { --bg:#101014; --panel:#191c22; --muted:#9aa1ad; --accent:#6ecbff; }
-    body { margin:0; font-family:system-ui, Segoe UI, Arial; background:var(--bg); color:#e9edf3; }
-    .app { width:340px; padding:14px; }
-    .card { background:var(--panel); border-radius:14px; box-shadow:0 10px 30px rgba(0,0,0,.4); padding:14px; margin-bottom:12px; }
-    h1 { font-size:18px; margin:0 0 10px; }
-    .tabs { display:flex; gap:6px; margin:8px 0 10px; }
-    .tab { flex:1; padding:8px; text-align:center; border-radius:10px; cursor:pointer; background:#22262f; user-select:none; }
-    .tab.active { outline:2px solid var(--accent); }
-    .row { display:flex; gap:8px; align-items:center; }
-    .row > * { flex:1; }
-    .pill { font-size:12px; padding:4px 8px; border-radius:999px; background:#232836; color:var(--muted); }
-    .list { display:grid; gap:6px; margin-top:8px; }
-    .item { display:flex; align-items:center; gap:8px; background:#141820; padding:8px; border-radius:10px; }
-    .item a { color:#cfe7ff; text-decoration:none; }
-    .muted { color:var(--muted); font-size:12px; }
-    .controls { display:flex; gap:8px; flex-wrap:wrap; }
-    button { padding:8px 10px; border:0; border-radius:10px; background:#2a3140; color:#e9edf3; cursor:pointer; }
-    button.primary { background:#6ecbff; color:#0a0f16; font-weight:600; }
-    input[type="text"] { width:100%; padding:8px; border-radius:8px; border:1px solid #2a3140; background:#0f131a; color:#e9edf3; }
-    .small { font-size:11px; color:var(--muted); }
-    #jsok { position:fixed; right:8px; top:8px; background:#2a3140; border-radius:10px; padding:4px 8px; font-size:12px; }
-  </style>
-</head>
-<body>
-  <div id="jsok">JS: loading…</div>
+// RS3 Resets Tracker — app.js (v21)
+// Everything runs AFTER the HTML is parsed, because index.html loads this with `defer`.
 
-  <div class="app">
-    <div class="card">
-      <h1>RS3 Resets Tracker</h1>
-      <div class="muted">Saves progress locally. Reset schedule uses <b>game time (UTC)</b>.</div>
-      <div class="row" style="margin-top:8px;">
-        <select id="profile"></select>
-        <button id="newProfile" type="button">New</button>
-        <button id="delProfile" type="button">Del</button>
-      </div>
-      <div class="row">
-        <div class="pill">Next daily: <span id="nextDaily">—</span></div>
-        <div class="pill">Weekly: <span id="nextWeekly">—</span></div>
-        <div class="pill">Monthly: <span id="nextMonthly">—</span></div>
-      </div>
-    </div>
+(function () {
+  // ---- Badge so you know JS actually ran ----
+  var badge = document.getElementById("jsok");
+  if (badge) { badge.textContent = "JS: OK v21"; }
 
-    <div class="card">
-      <div class="tabs">
-        <div class="tab active" data-scope="daily">Dailies</div>
-        <div class="tab" data-scope="weekly">Weeklies</div>
-        <div class="tab" data-scope="monthly">Monthlies</div>
-      </div>
-
-      <div class="controls">
-        <input id="addText" type="text" placeholder="Add task (optionally paste RS Wiki URL)"/>
-        <button id="addBtn" class="primary" type="button">Add</button>
-        <button id="bulkAdd" type="button">Bulk Add</button>
-        <button id="clearDone" type="button">Clear Done</button>
-      </div>
-
-      <div class="controls" style="margin-top:6px;">
-        <button id="importDailyScape" type="button">Import from DailyScape (strict)</button>
-        <button id="loadStarter" type="button">Load Starter Pack</button>
-        <button id="resetScope" type="button">Reset This Tab</button>
-        <button id="factoryReset" type="button">Factory Reset</button>
-      </div>
-
-      <div class="list" id="list"></div>
-      <div class="small" style="margin-top:8px;">
-        Tip: Click the task name to edit. Drag to reorder. Progress auto-resets at UTC boundaries:
-        dailies 00:00 UTC; weeklies 00:00 UTC Wednesdays; monthlies 00:00 UTC day 1.
-      </div>
-    </div>
-
-    <div class="card"><div class="small">Source: DailyScape (task ideas) + RS reset times.</div></div>
-  </div>
-
-  <!-- Put the JS last so the DOM exists before code runs -->
-  <script>
-  (function(){
-    const VERSION = "v22";
-    document.getElementById("jsok").textContent = "JS: OK " + VERSION;
-
-    // Alt1 identify (safe if not in Alt1)
-    try { if (window.alt1 && alt1.identifyAppUrl) { alt1.identifyAppUrl("https://hacza.github.io/RS3-Reset-Tracker.2/appconfig.json"); } } catch(e){}
-
-    /* ===== State ===== */
-    const LS_KEY = "rs3_resets_tracker_v1";
-    let state = load() || initDefault();
-    let currentScope = "daily";
-
-    /* ===== Elements ===== */
-    const el = (id) => document.getElementById(id);
-    const listEl = el("list");
-    const tabs = Array.from(document.querySelectorAll(".tab"));
-    const profileSel = el("profile");
-
-    /* ===== Profiles ===== */
-    function refreshProfiles() {
-      profileSel.innerHTML = "";
-      state.profiles.forEach((p,i) => {
-        const opt = document.createElement("option");
-        opt.value = i; opt.textContent = p.name; profileSel.appendChild(opt);
-      });
-      profileSel.value = state.currentProfile;
+  // ---- Alt1 register (safe if not inside Alt1) ----
+  try {
+    if (window.alt1 && alt1.identifyAppUrl) {
+      alt1.identifyAppUrl("https://hacza.github.io/RS3-Reset-Tracker.2/appconfig.json");
     }
-    el("newProfile").onclick = () => {
-      const name = prompt("Profile name?","Main");
-      if (!name) return;
-      state.profiles.push(emptyProfile(name));
-      state.currentProfile = String(state.profiles.length-1);
-      save(); refreshProfiles(); render();
-    };
-    el("delProfile").onclick = () => {
-      if (state.profiles.length <= 1) return alert("Keep at least one profile.");
-      if (!confirm("Delete current profile?")) return;
-      const idx = +state.currentProfile;
-      state.profiles.splice(idx,1);
-      state.currentProfile = "0";
-      save(); refreshProfiles(); render();
-    };
-    profileSel.onchange = () => { state.currentProfile = profileSel.value; save(); render(); };
+  } catch (e) {}
 
-    /* ===== Tabs ===== */
-    tabs.forEach(t => t.onclick = () => {
-      tabs.forEach(x=>x.classList.remove("active"));
-      t.classList.add("active");
-      currentScope = t.dataset.scope;
-      renderList();
-    });
+  // ===== State =====
+  var LS_KEY = "rs3_resets_tracker_v1";
+  var state = load() || initDefault();
+  var currentScope = "daily";
 
-    /* ===== Add & edit ===== */
-    el("addBtn").onclick = addItem;
-    el("addText").addEventListener("keydown", e => { if (e.key === "Enter") addItem(); });
-    function addItem() {
-      const txt = el("addText").value.trim();
-      if (!txt) return;
-      const m = txt.match(/https?:\/\/\S+/);
-      const name = txt.replace(/https?:\/\/\S+/,"").trim() || txt;
-      const url = m ? m[0] : "";
-      getScopeArr().push({ id: uid(), name, url, done:false });
-      el("addText").value = "";
-      save(); renderList();
+  // ===== Elements =====
+  function el(id){ return document.getElementById(id); }
+  var listEl = el("list");
+  var tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
+  var profileSel = el("profile");
+
+  // ===== Profiles =====
+  function refreshProfiles() {
+    profileSel.innerHTML = "";
+    for (var i=0; i<state.profiles.length; i++){
+      var p = state.profiles[i];
+      var opt = document.createElement("option");
+      opt.value = i;
+      opt.textContent = p.name;
+      profileSel.appendChild(opt);
     }
+    profileSel.value = state.currentProfile;
+  }
+  el("newProfile").onclick = function(){
+    var name = prompt("Profile name?","Main");
+    if (!name) return;
+    state.profiles.push(emptyProfile(name));
+    state.currentProfile = String(state.profiles.length-1);
+    save(); refreshProfiles(); render();
+  };
+  el("delProfile").onclick = function(){
+    if (state.profiles.length <= 1) { alert("Keep at least one profile."); return; }
+    if (!confirm("Delete current profile?")) return;
+    var idx = +state.currentProfile;
+    state.profiles.splice(idx,1);
+    state.currentProfile = "0";
+    save(); refreshProfiles(); render();
+  };
+  profileSel.onchange = function(){ state.currentProfile = profileSel.value; save(); render(); };
 
-    // NEW: Bulk Add — paste many lines at once (with or without links)
-    el("bulkAdd").onclick = () => {
-      const hint = [
-        "Paste one task per line. You can include a Wiki URL after the name.",
-        "Examples:",
-        "Vis wax https://runescape.wiki/w/Vis_wax",
-        "Reaper assignment https://runescape.wiki/w/Reaper_assignment",
-        "",
-        "Paste here:"
-      ].join("\\n");
-      const text = prompt(hint, "");
-      if (!text) return;
-      const lines = text.split(/\\r?\\n/).map(l=>l.trim()).filter(Boolean);
-      const arr = getScopeArr();
-      const have = new Set(arr.map(h => (h.name||"").toLowerCase()));
-      let added = 0;
-      for (const line of lines){
-        const m = line.match(/https?:\\/\\/\\S+/);
-        const url = m ? m[0] : "";
-        let name = line.replace(/https?:\\/\\/\\S+/,"").replace(/[–—-]\\s*$/,"").trim();
-        if (!name) continue;
-        const key = name.toLowerCase();
-        if (have.has(key)) continue;
-        arr.push({ id: uid(), name, url, done:false });
-        have.add(key); added++;
-      }
-      save(); renderList();
-      alert(\`Added \${added} \${currentScope} task(s).\`);
-    };
+  // ===== Tabs =====
+  for (var t=0; t<tabs.length; t++){
+    (function(tab){
+      tab.onclick = function(){
+        for (var j=0; j<tabs.length; j++) tabs[j].classList.remove("active");
+        tab.classList.add("active");
+        currentScope = tab.getAttribute("data-scope");
+        renderList();
+      };
+    })(tabs[t]);
+  }
 
-    /* ===== List render (checkbox + delete + drag) ===== */
-    function renderList() {
-      const arr = getScopeArr();
-      listEl.innerHTML = "";
-      arr.forEach((it, idx) => {
-        const row = document.createElement("div");
+  // ===== Add & edit =====
+  el("addBtn").onclick = addItem;
+  el("addText").addEventListener("keydown", function(e){ if (e.key === "Enter") addItem(); });
+  function addItem() {
+    var txt = el("addText").value.trim();
+    if (!txt) return;
+    var m = txt.match(/https?:\/\/\S+/);
+    var name = txt.replace(/https?:\/\/\S+/,"").trim() || txt;
+    var url = m ? m[0] : "";
+    getScopeArr().push({ id: uid(), name: name, url: url, done:false });
+    el("addText").value = "";
+    save(); renderList();
+  }
+
+  // ===== List render (checkbox + delete + drag) =====
+  function renderList() {
+    var arr = getScopeArr();
+    listEl.innerHTML = "";
+    for (var i=0; i<arr.length; i++){
+      (function(it, idx){
+        var row = document.createElement("div");
         row.className = "item"; row.draggable = true;
 
-        const cb = document.createElement("input");
+        var cb = document.createElement("input");
         cb.type = "checkbox"; cb.checked = !!it.done;
-        cb.onchange = () => { it.done = cb.checked; save(); };
+        cb.onchange = function(){ it.done = cb.checked; save(); };
 
-        const name = document.createElement("input");
+        var name = document.createElement("input");
         name.value = it.name;
-        Object.assign(name.style,{flex:"1",background:"transparent",color:"#e9edf3",border:"0",outline:"none"});
-        name.onchange = () => { it.name = name.value.trim(); save(); };
+        name.style.flex = "1";
+        name.style.background = "transparent";
+        name.style.color = "#e9edf3";
+        name.style.border = "0";
+        name.style.outline = "none";
+        name.onchange = function(){ it.name = name.value.trim(); save(); };
 
-        const link = document.createElement("a");
+        var link = document.createElement("a");
         link.href = it.url || "#";
         link.textContent = it.url ? "Wiki" : "";
         link.target = "_blank";
 
-        const del = document.createElement("button");
+        var del = document.createElement("button");
         del.textContent = "Del";
         del.style.padding = "6px 8px";
-        del.onclick = () => {
-          if (confirm(\`Delete "\${it.name}"?\`)) {
+        del.onclick = function(){
+          if (confirm('Delete "' + it.name + '"?')) {
             arr.splice(idx, 1);
             save(); renderList();
           }
         };
 
-        row.append(cb, name, link, del);
+        row.appendChild(cb);
+        row.appendChild(name);
+        row.appendChild(link);
+        row.appendChild(del);
 
         // drag-to-reorder
-        row.addEventListener("dragstart", e => e.dataTransfer.setData("text/plain", idx));
-        row.addEventListener("dragover", e => e.preventDefault());
-        row.addEventListener("drop", e => {
+        row.addEventListener("dragstart", function(e){ e.dataTransfer.setData("text/plain", idx); });
+        row.addEventListener("dragover", function(e){ e.preventDefault(); });
+        row.addEventListener("drop", function(e){
           e.preventDefault();
-          const from = +e.dataTransfer.getData("text/plain");
-          const to = idx;
+          var from = +e.dataTransfer.getData("text/plain");
+          var to = idx;
           if (from===to) return;
-          const a = arr[from];
+          var a = arr[from];
           arr.splice(from,1); arr.splice(to,0,a);
           save(); renderList();
         });
 
         listEl.appendChild(row);
-      });
+      })(arr[i], i);
     }
+  }
 
-    /* ===== Import from DailyScape (STRICT) ===== */
-    el("importDailyScape").onclick = async () => {
-      const BTN = el("importDailyScape");
-      const prev = BTN.textContent; BTN.textContent = "Importing…"; BTN.disabled = true;
+  // ===== Import from DailyScape (STRICT: RS wiki link + clear frequency only) =====
+  el("importDailyScape").onclick = function(){ importDailyScapeStrict(); };
 
-      const SOURCES = [
-        "https://dailyscape.github.io/rsdata/rsdata.js",
-        "https://cdn.jsdelivr.net/gh/dailyscape/rsdata@main/rsdata.js",
-        "https://dailyscape.github.io/rsdata/rsapidatawikibulk.js",
-        "https://cdn.jsdelivr.net/gh/dailyscape/rsdata@main/rsapidatawikibulk.js"
-      ];
+  function importDailyScapeStrict(){
+    var BTN = el("importDailyScape");
+    var prev = BTN.textContent; BTN.textContent = "Importing…"; BTN.disabled = true;
 
-      try {
-        let ds = null, used = null, errs = [];
-        for (const src of SOURCES) {
-          try { delete window.rsapidata; } catch {}
-          await new Promise((resolve, reject) => {
-            const s = document.createElement("script");
-            s.src = src + "?t=" + Date.now(); s.async = true;
-            s.onload = () => resolve();
-            s.onerror = () => reject(new Error("script load failed"));
-            document.head.appendChild(s);
-          }).catch(e => errs.push(src+" — "+e.message));
+    var SOURCES = [
+      "https://dailyscape.github.io/rsdata/rsdata.js",
+      "https://cdn.jsdelivr.net/gh/dailyscape/rsdata@main/rsdata.js",
+      "https://dailyscape.github.io/rsdata/rsapidatawikibulk.js",
+      "https://cdn.jsdelivr.net/gh/dailyscape/rsdata@main/rsapidatawikibulk.js"
+    ];
 
-        try { if (!ds && typeof rsapidata !== "undefined") ds = rsapidata; } catch {}
-        if (!ds && window.rsapidata) ds = window.rsapidata;
-        if (ds) { used = src; break; }
-        }
-        if (!ds) throw new Error("No dataset. Tried:\\n" + errs.join("\\n"));
+    (function run(){
+      var ds = null, used = null, errs = [];
+      var i = 0;
 
-        // Helpers
-        const NAME_KEYS = ["name","item","title","label","task","activity","text"];
-        const URL_KEYS  = ["wiki","url","link","wikilink","w","page"];
-        const RS_WIKI   = /runescape\\.wiki/i;
-
-        const pullName = (o)=>{ for (const k of NAME_KEYS) if (typeof o?.[k]==="string" && o[k].trim()) return o[k].trim(); return ""; };
-        const pullUrl  = (o)=>{ for (const k of URL_KEYS)  if (typeof o?.[k]==="string" && o[k].trim()) return o[k].trim(); return ""; };
-        const freqWord = (s)=>{ const t=(s||"").toLowerCase(); if (t.includes("daily")) return "daily"; if (t.includes("week")) return "weekly"; if (t.includes("month")) return "monthly"; return ""; };
-        const infer    = (o)=>{ 
-          for (const [k,v] of Object.entries(o)) {
-            const f = freqWord(k) || (typeof v==="string" && freqWord(v));
-            if (f) return f;
-          }
-          if (typeof o.frequency==="string") return freqWord(o.frequency);
-          if (typeof o.interval==="string")  return freqWord(o.interval);
-          if (typeof o.reset==="string")     return freqWord(o.reset);
-          return "";
+      function next(){
+        if (i >= SOURCES.length) return done(new Error("No dataset. Tried:\n" + errs.join("\n")));
+        // clear possible previous binding
+        try { delete window.rsapidata; } catch(e){}
+        var src = SOURCES[i] + "?t=" + Date.now();
+        var s = document.createElement("script");
+        s.src = src; s.async = true;
+        s.onload = function(){
+          try { if (!ds && typeof rsapidata !== "undefined") ds = rsapidata; } catch(e){}
+          if (!ds && window.rsapidata) ds = window.rsapidata;
+          if (ds) { used = SOURCES[i]; return proceed(ds, used); }
+          i++; next();
         };
+        s.onerror = function(){ errs.push(SOURCES[i] + " — script load failed"); i++; next(); };
+        document.head.appendChild(s);
+      }
 
-        // Crawl + STRICT filter (must have RS wiki link AND bucket)
-        const seen = new WeakSet();
-        const candidates = [];
-        function walk(x, depth=0){
-          if (depth>6 || x==null) return;
-          if (Array.isArray(x)) { x.forEach(v=>walk(v, depth+1)); return; }
-          if (typeof x === "object") {
-            if (seen.has(x)) return; seen.add(x);
-            const name = pullName(x);
-            const url  = pullUrl(x);
-            const bucket = infer(x);
-            if (name && url && RS_WIKI.test(url) && bucket) {
-              candidates.push({name, url, bucket});
+      function proceed(dsObj, usedUrl){
+        // helpers
+        var NAME_KEYS = ["name","item","title","label","task","activity","text"];
+        var URL_KEYS  = ["wiki","url","link","wikilink","w","page"];
+        var RS_WIKI   = /runescape\.wiki/i;
+
+        function pullName(o){
+          for (var k=0; k<NAME_KEYS.length; k++){
+            var kk = NAME_KEYS[k];
+            if (o && typeof o[kk]==="string" && o[kk].trim()) return o[kk].trim();
+          }
+          return "";
+        }
+        function pullUrl(o){
+          for (var k=0; k<URL_KEYS.length; k++){
+            var kk = URL_KEYS[k];
+            if (o && typeof o[kk]==="string" && o[kk].trim()) return o[kk].trim();
+          }
+          return "";
+        }
+        function freqWord(s){
+          var t = (s||"").toLowerCase();
+          if (t.indexOf("daily")>-1) return "daily";
+          if (t.indexOf("week")>-1)  return "weekly";
+          if (t.indexOf("month")>-1) return "monthly";
+          return "";
+        }
+        function infer(o){
+          for (var key in o){
+            if (!o.hasOwnProperty(key)) continue;
+            var v = o[key];
+            var f = freqWord(key);
+            if (f) return f;
+            if (typeof v === "string"){
+              var f2 = freqWord(v);
+              if (f2) return f2;
             }
-            for (const v of Object.values(x)) walk(v, depth+1);
+          }
+          if (o && typeof o.frequency === "string") return freqWord(o.frequency);
+          if (o && typeof o.interval  === "string") return freqWord(o.interval);
+          if (o && typeof o.reset     === "string") return freqWord(o.reset);
+          return "";
+        }
+
+        // crawl
+        var seen = [];
+        var seenSet = new WeakSet();
+        var candidates = [];
+
+        function walk(x, depth){
+          if (depth>6 || x==null) return;
+          if (Object.prototype.toString.call(x) === "[object Array]"){
+            for (var a=0; a<x.length; a++) walk(x[a], depth+1);
+            return;
+          }
+          if (typeof x === "object"){
+            if (seenSet.has(x)) return;
+            seenSet.add(x);
+            seen.push(x);
+
+            var name = pullName(x);
+            var url  = pullUrl(x);
+            var bucket = infer(x);
+
+            // STRICT: must have RS wiki link AND clear bucket
+            if (name && url && RS_WIKI.test(url) && bucket){
+              candidates.push({name:name, url:url, bucket:bucket});
+            }
+            for (var k in x) if (x.hasOwnProperty(k)) walk(x[k], depth+1);
           }
         }
-        walk(ds);
+        walk(dsObj, 0);
 
-        // Bucket + dedupe
-        const daily=[], weekly=[], monthly=[];
-        const have = new Set();
-        const pushU = (arr,t)=>{ const key=t.name.toLowerCase(); if (!have.has(key)) { arr.push(t); have.add(key); } };
-        candidates.forEach(t => {
+        // bucket + dedupe
+        var daily=[], weekly=[], monthly=[];
+        var have = Object.create(null);
+        function pushU(arr,t){
+          var key = t.name.toLowerCase();
+          if (!have[key]){ arr.push(t); have[key]=1; }
+        }
+        for (var c=0; c<candidates.length; c++){
+          var t = candidates[c];
           if (t.bucket==="daily") pushU(daily,t);
           else if (t.bucket==="weekly") pushU(weekly,t);
           else if (t.bucket==="monthly") pushU(monthly,t);
-        });
+        }
 
-        const found = { daily: daily.length, weekly: weekly.length, monthly: monthly.length };
+        var found = { daily: daily.length, weekly: weekly.length, monthly: monthly.length };
 
-        // Merge into your profile
-        const added = { daily:0, weekly:0, monthly:0 };
-        const buckets = { daily, weekly, monthly };
-        ["daily","weekly","monthly"].forEach(scope => {
-          const incoming = buckets[scope] || [];
-          const here = state.profiles[getP()].items[scope];
-          const have2 = new Set(here.map(h => (h.name || "").toLowerCase()));
-          incoming.forEach(t => {
-            const key = (t.name || "").toLowerCase();
-            if (!key || have2.has(key)) return;
-            here.push({ id: uid(), name: t.name, url: t.url || "", done: false });
-            have2.add(key);
-            added[scope]++;
-          });
-        });
+        // merge
+        var added = { daily:0, weekly:0, monthly:0 };
+        var scopes = ["daily","weekly","monthly"];
+        for (var si=0; si<scopes.length; si++){
+          var scope = scopes[si];
+          var incoming = scope==="daily"?daily: scope==="weekly"?weekly: monthly;
+          var here = state.profiles[getP()].items[scope];
+          var have2 = Object.create(null);
+          for (var h=0; h<here.length; h++){
+            var k2 = (here[h].name||"").toLowerCase();
+            if (k2) have2[k2]=1;
+          }
+          for (var ii=0; ii<incoming.length; ii++){
+            var key = (incoming[ii].name||"").toLowerCase();
+            if (!key || have2[key]) continue;
+            here.push({ id: uid(), name: incoming[ii].name, url: incoming[ii].url || "", done: false });
+            have2[key]=1; added[scope]++;
+          }
+        }
 
         save(); renderList();
 
-        let msg = `Imported from DailyScape
-Found: ${found.daily} daily, ${found.weekly} weekly, ${found.monthly} monthly.
-Added: ${added.daily} daily, ${added.weekly} weekly, ${added.monthly} monthly.
-Source: ${used}`;
+        var msg = "Imported from DailyScape\n" +
+                  "Found: " + found.daily + " daily, " + found.weekly + " weekly, " + found.monthly + " monthly.\n" +
+                  "Added: " + added.daily + " daily, " + added.weekly + " weekly, " + added.monthly + " monthly.\n" +
+                  "Source: " + usedUrl;
         if (!found.daily && !found.weekly && !found.monthly) {
-          msg += `
-
-No clearly-labeled tasks were found.
-(I only import entries that BOTH link to the RuneScape Wiki AND explicitly mention daily/weekly/monthly.)`;
+          msg += "\n\nNo clearly-labeled tasks were found.\n(I only import entries that BOTH link to the RuneScape Wiki AND explicitly mention daily/weekly/monthly.)";
         }
         alert(msg);
+        done(null);
+      }
 
-      } catch (e) {
-        console.error(e);
-        alert("Import failed: " + e.message);
-      } finally {
+      function done(err){
         BTN.textContent = prev; BTN.disabled = false;
+        if (err) { console.error(err); alert("Import failed: " + err.message); }
       }
-    };
 
-    /* ===== Starter Pack (optional) ===== */
-    el("loadStarter").onclick = () => {
-      if (!confirm("Add a small starter set? (You can delete or edit anything later.)")) return;
-      const adds = {
-        daily: [
-          "Vis wax https://runescape.wiki/w/Vis_wax",
-          "Reaper assignment https://runescape.wiki/w/Reaper_assignment",
-          "Divine locations https://runescape.wiki/w/Divination#Divine_locations",
-          "Treasure Hunter keys https://runescape.wiki/w/Treasure_Hunter",
-          "Familiar upkeep",
-          "Check POF animals https://runescape.wiki/w/Player-owned_farm"
-        ],
-        weekly: [
-          "Penguin hide and seek https://runescape.wiki/w/Penguin_Hide_and_Seek",
-          "Tears of Guthix https://runescape.wiki/w/Tears_of_Guthix_(minigame)",
-          "Rush of Blood https://runescape.wiki/w/Rush_of_Blood",
-          "Wilderness Flash Events https://runescape.wiki/w/Wilderness_Flash_Events"
-        ],
-        monthly: [
-          "Giant Oyster https://runescape.wiki/w/Giant_Oyster",
-          "God Statues https://runescape.wiki/w/God_Statues",
-          "Premier Club Vault https://runescape.wiki/w/Premier_Club_Vault"
-        ]
-      };
-      for (const scope of ["daily","weekly","monthly"]) {
-        const here = state.profiles[getP()].items[scope];
-        const have = new Set(here.map(h => (h.name || "").toLowerCase()));
-        adds[scope].forEach(line => {
-          const m = line.match(/https?:\/\/\S+/);
-          const url = m ? m[0] : "";
-          const name = line.replace(/https?:\/\/\S+/,"").trim();
-          const key = name.toLowerCase();
-          if (!have.has(key)) { here.push({ id: uid(), name, url, done:false }); have.add(key); }
-        });
+      next();
+    })();
+  }
+
+  // ===== Starter Pack (optional) =====
+  el("loadStarter").onclick = function(){
+    if (!confirm("Add a small starter set? (You can delete or edit anything later.)")) return;
+    var adds = {
+      daily: [
+        "Vis wax", "Reaper assignment", "Divine locations", "Familiar upkeep", "Player-owned farm animals check"
+      ],
+      weekly: [
+        "Penguin hide and seek", "Tears of Guthix", "Wilderness flash events"
+      ],
+      monthly: [
+        "Giant Oyster", "God Statues"
+      ]
+    };
+    var scopes = ["daily","weekly","monthly"];
+    for (var si=0; si<scopes.length; si++){
+      var scope = scopes[si];
+      var here = state.profiles[getP()].items[scope];
+      var have = Object.create(null);
+      for (var h=0; h<here.length; h++){
+        var k2 = (here[h].name||"").toLowerCase();
+        if (k2) have[k2]=1;
       }
+      for (var a=0; a<adds[scope].length; a++){
+        var n = adds[scope][a];
+        var key = n.toLowerCase();
+        if (!have[key]) here.push({ id: uid(), name: n, url: "", done:false });
+      }
+    }
+    save(); renderList();
+    alert("Starter tasks added. You can edit names or attach Wiki links any time.");
+  };
+
+  // ===== Utility buttons =====
+  el("clearDone").onclick = function(){ var arr = getScopeArr(); for (var i=0;i<arr.length;i++) arr[i].done=false; save(); renderList(); };
+  el("resetScope").onclick = function(){ if (confirm("Clear all tasks on this tab?")) { state.profiles[getP()].items[currentScope] = []; save(); renderList(); } };
+  el("factoryReset").onclick = function(){
+    if (!confirm("Factory Reset will remove ALL profiles and tasks saved in this browser. Continue?")) return;
+    localStorage.removeItem(LS_KEY);
+    state = initDefault();
+    save(); location.reload();
+  };
+
+  // ===== Timers (UTC) =====
+  function nextDailyUTC(now){ now = now || new Date(); return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+1, 0,0,0)); }
+  function nextWeeklyUTC(now){ now = now || new Date(); var day = now.getUTCDay(); var daysToWed = (3 - day + 7) % 7 || 7; return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+daysToWed, 0,0,0)); }
+  function firstOfNextMonthUTC(now){ now = now || new Date(); var y=now.getUTCFullYear(), m=now.getUTCMonth(); return new Date(Date.UTC(m===11?y+1:y, (m+1)%12, 1, 0,0,0)); }
+
+  function tickClocks() {
+    var now = new Date();
+    el("nextDaily").textContent   = eta(nextDailyUTC(now)-now);
+    el("nextWeekly").textContent  = eta(nextWeeklyUTC(now)-now);
+    el("nextMonthly").textContent = eta(firstOfNextMonthUTC(now)-now);
+    maybeReset("daily",   state.meta.lastDailyReset,   nextDailyUTC,   "lastDailyReset");
+    maybeReset("weekly",  state.meta.lastWeeklyReset,  nextWeeklyUTC,  "lastWeeklyReset");
+    maybeReset("monthly", state.meta.lastMonthlyReset, firstOfNextMonthUTC, "lastMonthlyReset");
+    requestAnimationFrame(tickClocks);
+  }
+  function maybeReset(scope, lastIso, nextFn, field) {
+    var now = new Date();
+    var last = lastIso ? new Date(lastIso) : new Date(0);
+    var next = nextFn(last);
+    if (now >= next) {
+      var arr = state.profiles[getP()].items[scope];
+      for (var i=0;i<arr.length;i++) arr[i].done=false;
+      state.meta[field] = now.toISOString();
       save(); renderList();
-      alert("Starter tasks added. You can edit names or attach Wiki links any time.");
+    }
+  }
+  function eta(ms) { if (ms<0) ms=0; var s=Math.floor(ms/1000); var h=('0'+Math.floor(s/3600)).slice(-2); var m=('0'+Math.floor((s%3600)/60)).slice(-2); var ss=('0'+(s%60)).slice(-2); return h+':'+m+':'+ss; }
+
+  // ===== Helpers =====
+  function initDefault() {
+    return {
+      currentProfile: "0",
+      profiles: [emptyProfile("Main")],
+      meta: { lastDailyReset: new Date().toISOString(), lastWeeklyReset: new Date().toISOString(), lastMonthlyReset: new Date().toISOString() }
     };
+  }
+  function emptyProfile(name) { return { name: name, items: { daily: [], weekly: [], monthly: [] } }; }
+  function getP(){ return +state.currentProfile; }
+  function getScopeArr(){ return state.profiles[getP()].items[currentScope]; }
+  function uid(){ return Math.random().toString(36).slice(2,9); }
+  function load(){ try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch (e) { return null; } }
+  function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
 
-    /* ===== Utility buttons ===== */
-    el("clearDone").onclick = () => { getScopeArr().forEach(x=>x.done=false); save(); renderList(); };
-    el("resetScope").onclick = () => { if (confirm("Clear all tasks on this tab?")) { state.profiles[getP()].items[currentScope] = []; save(); renderList(); } };
-    el("factoryReset").onclick = () => {
-      if (!confirm("Factory Reset will remove ALL profiles and tasks saved in this browser. Continue?")) return;
-      localStorage.removeItem(LS_KEY);
-      state = initDefault();
-      save(); location.reload();
-    };
-
-    /* ===== Timers (UTC) ===== */
-    function nextDailyUTC(now=new Date())   { return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+1, 0,0,0)); }
-    function nextWeeklyUTC(now=new Date())  { const day = now.getUTCDay(); const daysToWed = (3 - day + 7) % 7 || 7; return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+daysToWed, 0,0,0)); }
-    function firstOfNextMonthUTC(now=new Date()) { const y=now.getUTCFullYear(), m=now.getUTCMonth(); return new Date(Date.UTC(m===11?y+1:y, (m+1)%12, 1, 0,0,0)); }
-    function tickClocks() {
-      const now = new Date();
-      el("nextDaily").textContent   = eta(nextDailyUTC(now)-now);
-      el("nextWeekly").textContent  = eta(nextWeeklyUTC(now)-now);
-      el("nextMonthly").textContent = eta(firstOfNextMonthUTC(now)-now);
-      maybeReset("daily",   state.meta.lastDailyReset,   nextDailyUTC,   "lastDailyReset");
-      maybeReset("weekly",  state.meta.lastWeeklyReset,  nextWeeklyUTC,  "lastWeeklyReset");
-      maybeReset("monthly", state.meta.lastMonthlyReset, firstOfNextMonthUTC, "lastMonthlyReset");
-      requestAnimationFrame(tickClocks);
-    }
-    function maybeReset(scope, lastIso, nextFn, field) {
-      const now = new Date();
-      const last = lastIso ? new Date(lastIso) : new Date(0);
-      const next = nextFn(last);
-      if (now >= next) {
-        state.profiles[getP()].items[scope].forEach(x=>x.done=false);
-        state.meta[field] = now.toISOString();
-        save(); renderList();
-      }
-    }
-    function eta(ms) { if (ms<0) ms=0; const s=Math.floor(ms/1000); const h=String(Math.floor(s/3600)).padStart(2,"0"); const m=String(Math.floor((s%3600)/60)).padStart(2,"0"); const ss=String(s%60).padStart(2,"0"); return \`\${h}:\${m}:\${ss}\`; }
-
-    /* ===== Helpers ===== */
-    function initDefault() {
-      return {
-        currentProfile: "0",
-        profiles: [emptyProfile("Main")],
-        meta: { lastDailyReset: new Date().toISOString(), lastWeeklyReset: new Date().toISOString(), lastMonthlyReset: new Date().toISOString() }
-      };
-    }
-    function emptyProfile(name) { return { name, items: { daily: [], weekly: [], monthly: [] } }; }
-    function getP(){ return +state.currentProfile; }
-    function getScopeArr(){ return state.profiles[getP()].items[currentScope]; }
-    function uid(){ return Math.random().toString(36).slice(2,9); }
-    function load(){ try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch { return null; } }
-    function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
-
-    // Boot
+  // Boot
+  try {
     refreshProfiles(); render(); tickClocks();
-    function render(){ refreshProfiles(); tabs.forEach(t => t.classList.toggle("active", t.dataset.scope===currentScope)); renderList(); }
-  })();
-  </script>
-</body>
-</html>
+  } catch (e) {
+    console.error(e);
+    if (badge) badge.textContent = "JS error (open console)";
+    alert("JS error: " + e.message);
+  }
+
+  function render(){
+    refreshProfiles();
+    for (var j=0;j<tabs.length;j++){
+      var s = tabs[j].getAttribute("data-scope");
+      if (s === currentScope) tabs[j].classList.add("active"); else tabs[j].classList.remove("active");
+    }
+    renderList();
+  }
+})();
