@@ -19,7 +19,7 @@
     .list { display:grid; gap:6px; margin-top:8px; }
     .item { display:flex; align-items:center; gap:8px; background:#141820; padding:8px; border-radius:10px; }
     .item a { color:#cfe7ff; text-decoration:none; }
-    .muted { color:var(--muted); font-size:12px; }
+    .muted { color:#9aa1ad; font-size:12px; }
     .controls { display:flex; gap:8px; flex-wrap:wrap; }
     button { padding:8px 10px; border:0; border-radius:10px; background:#2a3140; color:#e9edf3; cursor:pointer; }
     button.primary { background:#6ecbff; color:#0a0f16; font-weight:600; }
@@ -62,7 +62,7 @@
       </div>
 
       <div class="controls" style="margin-top:6px;">
-        <button id="importDailyScape" type="button">Import from DailyScape (strict)</button>
+        <button id="importDSjson" type="button">Import DS Export (JSON)</button>
         <button id="loadStarter" type="button">Load Starter Pack</button>
         <button id="resetScope" type="button">Reset This Tab</button>
         <button id="factoryReset" type="button">Factory Reset</button>
@@ -75,12 +75,13 @@
       </div>
     </div>
 
-    <div class="card"><div class="small">Source: DailyScape (task ideas) + RS reset times.</div></div>
+    <div class="card"><div class="small">Manual import supported: paste the JSON you get from DailyScape → Export.</div></div>
   </div>
 
+  <!-- JS last -->
   <script>
   (function(){
-    const VERSION = "v23";
+    const VERSION = "v24";
     document.getElementById("jsok").textContent = "JS: OK " + VERSION;
     try { if (window.alt1 && alt1.identifyAppUrl) { alt1.identifyAppUrl("https://hacza.github.io/RS3-Reset-Tracker.2/appconfig.json"); } } catch(e){}
 
@@ -93,6 +94,7 @@
     const tabs = Array.from(document.querySelectorAll(".tab"));
     const profileSel = el("profile");
 
+    // Profiles
     function refreshProfiles() {
       profileSel.innerHTML = "";
       state.profiles.forEach((p,i) => {
@@ -118,6 +120,7 @@
     };
     profileSel.onchange = () => { state.currentProfile = profileSel.value; save(); render(); };
 
+    // Tabs
     tabs.forEach(t => t.onclick = () => {
       tabs.forEach(x=>x.classList.remove("active"));
       t.classList.add("active");
@@ -125,6 +128,7 @@
       renderList();
     });
 
+    // Add / Bulk add
     el("addBtn").onclick = addItem;
     el("addText").addEventListener("keydown", e => { if (e.key === "Enter") addItem(); });
     function addItem() {
@@ -137,7 +141,6 @@
       el("addText").value = "";
       save(); renderList();
     }
-
     el("bulkAdd").onclick = () => {
       const hint = [
         "Paste one task per line. You can include a Wiki URL after the name.",
@@ -156,7 +159,7 @@
       for (const line of lines){
         const m = line.match(/https?:\\/\\/\\S+/);
         const url = m ? m[0] : "";
-        const name = line.replace(/https?:\\/\\/\\S+/,"").replace(/[–—-]\\s*$/,"").trim();
+        let name = line.replace(/https?:\\/\\/\\S+/,"").replace(/[–—-]\\s*$/,"").trim();
         if (!name) continue;
         const key = name.toLowerCase();
         if (have.has(key)) continue;
@@ -167,6 +170,7 @@
       alert(\`Added \${added} \${currentScope} task(s).\`);
     };
 
+    // List render
     function renderList() {
       const arr = getScopeArr();
       listEl.innerHTML = "";
@@ -216,118 +220,74 @@
       });
     }
 
-    el("importDailyScape").onclick = async () => {
-      const BTN = el("importDailyScape");
-      const prev = BTN.textContent; BTN.textContent = "Importing…"; BTN.disabled = true;
+    // NEW: Import DailyScape EXPORT (JSON pasted by you)
+    el("importDSjson").onclick = () => {
+      const raw = prompt("Paste the JSON from DailyScape → Export:", "");
+      if (!raw) return;
+      let data;
+      try { data = JSON.parse(raw); }
+      catch (e) { return alert("That wasn't valid JSON. Try copying again from DailyScape → Export."); }
 
-      const SOURCES = [
-        "https://dailyscape.github.io/rsdata/rsdata.js",
-        "https://cdn.jsdelivr.net/gh/dailyscape/rsdata@main/rsdata.js",
-        "https://dailyscape.github.io/rsdata/rsapidatawikibulk.js",
-        "https://cdn.jsdelivr.net/gh/dailyscape/rsdata@main/rsapidatawikibulk.js"
-      ];
-
-      try {
-        let ds = null, used = null, errs = [];
-        for (const src of SOURCES) {
-          try { delete window.rsapidata; } catch {}
-          await new Promise((resolve, reject) => {
-            const s = document.createElement("script");
-            s.src = src + "?t=" + Date.now(); s.async = true;
-            s.onload = () => resolve();
-            s.onerror = () => reject(new Error("script load failed"));
-            document.head.appendChild(s);
-          }).catch(e => errs.push(src+" — "+e.message));
-          try { if (!ds && typeof rsapidata !== "undefined") ds = rsapidata; } catch {}
-          if (!ds && window.rsapidata) ds = window.rsapidata;
-          if (ds) { used = src; break; }
+      const buckets = { daily:[], weekly:[], monthly:[], unknown:[] };
+      const NAME_KEYS = ["name","item","title","label","task","activity","text"];
+      const URL_KEYS  = ["wiki","url","link","wikilink","w","page"];
+      const freq = (s)=>{ const t=(s||"").toLowerCase(); if (t.includes("daily")) return "daily"; if (t.includes("week")) return "weekly"; if (t.includes("month")) return "monthly"; return ""; };
+      const pullName = (o)=>{ for (const k of NAME_KEYS) if (typeof o?.[k]==="string" && o[k].trim()) return o[k].trim(); return ""; };
+      const pullUrl  = (o)=>{ for (const k of URL_KEYS)  if (typeof o?.[k]==="string" && o[k].trim()) return o[k].trim(); return ""; };
+      const infer    = (o)=>{ 
+        for (const [k,v] of Object.entries(o||{})) {
+          const f = freq(k) || (typeof v==="string" && freq(v));
+          if (f) return f;
         }
-        if (!ds) throw new Error("No dataset. Tried:\\n" + errs.join("\\n"));
+        if (typeof o?.frequency==="string") return freq(o.frequency);
+        if (typeof o?.interval==="string")  return freq(o.interval);
+        if (typeof o?.reset==="string")     return freq(o.reset);
+        return "";
+      };
 
-        const NAME_KEYS = ["name","item","title","label","task","activity","text"];
-        const URL_KEYS  = ["wiki","url","link","wikilink","w","page"];
-        const RS_WIKI   = /runescape\\.wiki/i;
-
-        const pullName = (o)=>{ for (const k of NAME_KEYS) if (typeof o?.[k]==="string" && o[k].trim()) return o[k].trim(); return ""; };
-        const pullUrl  = (o)=>{ for (const k of URL_KEYS)  if (typeof o?.[k]==="string" && o[k].trim()) return o[k].trim(); return ""; };
-        const freqWord = (s)=>{ const t=(s||"").toLowerCase(); if (t.includes("daily")) return "daily"; if (t.includes("week")) return "weekly"; if (t.includes("month")) return "monthly"; return ""; };
-        const infer    = (o)=>{ 
-          for (const [k,v] of Object.entries(o)) {
-            const f = freqWord(k) || (typeof v==="string" && freqWord(v));
-            if (f) return f;
+      const seen = new WeakSet();
+      function walk(x, depth=0){
+        if (depth>8 || x==null) return;
+        if (Array.isArray(x)) { x.forEach(v=>walk(v, depth+1)); return; }
+        if (typeof x === "object") {
+          if (seen.has(x)) return; seen.add(x);
+          // array-of-strings style
+          if (x && Array.isArray(x.items) && x.items.every(s => typeof s === "string")) {
+            const b = infer(x) || currentScope;
+            x.items.forEach(n => buckets[b]?.push({name:n, url:""}));
           }
-          if (typeof o.frequency==="string") return freqWord(o.frequency);
-          if (typeof o.interval==="string")  return freqWord(o.interval);
-          if (typeof o.reset==="string")     return freqWord(o.reset);
-          return "";
-        };
-
-        const seen = new WeakSet();
-        const candidates = [];
-        function walk(x, depth=0){
-          if (depth>6 || x==null) return;
-          if (Array.isArray(x)) { x.forEach(v=>walk(v, depth+1)); return; }
-          if (typeof x === "object") {
-            if (seen.has(x)) return; seen.add(x);
-            const name = pullName(x);
-            const url  = pullUrl(x);
-            const bucket = infer(x);
-            if (name && url && RS_WIKI.test(url) && bucket) {
-              candidates.push({name, url, bucket});
-            }
-            for (const v of Object.values(x)) walk(v, depth+1);
+          const name = pullName(x);
+          const url  = pullUrl(x);
+          const b    = infer(x);
+          if (name) {
+            const bucket = b || currentScope;
+            (buckets[bucket] || buckets.unknown).push({name, url});
           }
+          for (const v of Object.values(x)) walk(v, depth+1);
         }
-        walk(ds);
-
-        const daily=[], weekly=[], monthly=[];
-        const have = new Set();
-        const pushU = (arr,t)=>{ const key=t.name.toLowerCase(); if (!have.has(key)) { arr.push(t); have.add(key); } };
-        candidates.forEach(t => {
-          if (t.bucket==="daily") pushU(daily,t);
-          else if (t.bucket==="weekly") pushU(weekly,t);
-          else if (t.bucket==="monthly") pushU(monthly,t);
-        });
-
-        const found = { daily: daily.length, weekly: weekly.length, monthly: monthly.length };
-
-        const added = { daily:0, weekly:0, monthly:0 };
-        const buckets = { daily, weekly, monthly };
-        ["daily","weekly","monthly"].forEach(scope => {
-          const incoming = buckets[scope] || [];
-          const here = state.profiles[getP()].items[scope];
-          const have2 = new Set(here.map(h => (h.name || "").toLowerCase()));
-          incoming.forEach(t => {
-            const key = (t.name || "").toLowerCase();
-            if (!key || have2.has(key)) return;
-            here.push({ id: uid(), name: t.name, url: t.url || "", done: false });
-            have2.add(key);
-            added[scope]++;
-          });
-        });
-
-        save(); renderList();
-
-        let msg = `Imported from DailyScape
-Found: ${found.daily} daily, ${found.weekly} weekly, ${found.monthly} monthly.
-Added: ${added.daily} daily, ${added.weekly} weekly, ${added.monthly} monthly.
-Source: ${used}`;
-        if (!found.daily && !found.weekly && !found.monthly) {
-          msg += `
-
-No clearly-labeled tasks were found.
-(I only import entries that BOTH link to the RuneScape Wiki AND explicitly mention daily/weekly/monthly.)`;
-        }
-        alert(msg);
-
-      } catch (e) {
-        console.error(e);
-        alert("Import failed: " + e.message);
-      } finally {
-        BTN.textContent = prev; BTN.disabled = false;
       }
+      walk(data);
+
+      // Merge into profile
+      const added = { daily:0, weekly:0, monthly:0, unknown:0 };
+      for (const scope of ["daily","weekly","monthly","unknown"]) {
+        const incoming = buckets[scope] || [];
+        const here = state.profiles[getP()].items[scope === "unknown" ? currentScope : scope];
+        const have = new Set(here.map(h => (h.name||"").toLowerCase()));
+        incoming.forEach(t => {
+          const key = (t.name||"").toLowerCase();
+          if (!key || have.has(key)) return;
+          here.push({ id: uid(), name: t.name, url: t.url || "", done:false });
+          have.add(key); added[scope]++;
+        });
+      }
+      save(); renderList();
+
+      alert(`Imported from pasted JSON
+Added: ${added.daily} daily, ${added.weekly} weekly, ${added.monthly} monthly${added.unknown?`, ${added.unknown} to current tab (uncategorized)`:''}.`);
     };
 
+    // Starter Pack / Utilities
     el("loadStarter").onclick = () => {
       if (!confirm("Add a small starter set? (You can delete or edit anything later.)")) return;
       const adds = {
@@ -363,12 +323,11 @@ No clearly-labeled tasks were found.
         });
       }
       save(); renderList();
-      alert("Starter tasks added. You can edit names or attach Wiki links any time.");
+      alert("Starter tasks added.");
     };
 
     el("clearDone").onclick = () => { getScopeArr().forEach(x=>x.done=false); save(); renderList(); };
     el("resetScope").onclick = () => { if (confirm("Clear all tasks on this tab?")) { state.profiles[getP()].items[currentScope] = []; save(); renderList(); } };
-
     el("factoryReset").onclick = () => {
       if (!confirm("Factory Reset will remove ALL profiles and tasks saved in this browser. Continue?")) return;
       localStorage.removeItem(LS_KEY);
@@ -376,6 +335,7 @@ No clearly-labeled tasks were found.
       save(); location.reload();
     };
 
+    // Timers
     function nextDailyUTC(now=new Date())   { return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+1, 0,0,0)); }
     function nextWeeklyUTC(now=new Date())  { const day = now.getUTCDay(); const daysToWed = (3 - day + 7) % 7 || 7; return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()+daysToWed, 0,0,0)); }
     function firstOfNextMonthUTC(now=new Date()) { const y=now.getUTCFullYear(), m=now.getUTCMonth(); return new Date(Date.UTC(m===11?y+1:y, (m+1)%12, 1, 0,0,0)); }
@@ -401,6 +361,7 @@ No clearly-labeled tasks were found.
     }
     function eta(ms) { if (ms<0) ms=0; const s=Math.floor(ms/1000); const h=String(Math.floor(s/3600)).padStart(2,"0"); const m=String(Math.floor((s%3600)/60)).padStart(2,"0"); const ss=String(s%60).padStart(2,"0"); return \`\${h}:\${m}:\${ss}\`; }
 
+    // Helpers
     function initDefault() {
       return {
         currentProfile: "0",
